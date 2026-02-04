@@ -7,7 +7,7 @@ You can use these skills with open-source ClickHouse and managed ClickHouse Clou
 ## Installation
 
 ```bash
-npx add-skill clickhouse/agent-skills
+npx add-skill @clickhouse/agent-skills
 ```
 
 The CLI auto-detects installed agents and prompts you to select where to install.
