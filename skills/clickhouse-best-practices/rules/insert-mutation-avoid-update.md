@@ -58,7 +58,7 @@ FROM users GROUP BY user_id;
 **MooseStack - ReplacingMergeTree for updates:**
 
 ```typescript
-import { Key, LowCardinality, UInt64, OlapTable, ClickHouseDefault } from "@514labs/moose-lib";
+import { Key, LowCardinality, UInt64, OlapTable, ClickHouseDefault, ClickHouseEngines } from "@514labs/moose-lib";
 
 interface User {
   userId: Key<UInt64>;
@@ -70,7 +70,8 @@ interface User {
 // Use ReplacingMergeTree engine for update patterns
 export const usersTable = new OlapTable<User>("users", {
   orderByFields: ["userId"],
-  engine: "ReplacingMergeTree(updatedAt)"  // Version column for deduplication
+  engine: ClickHouseEngines.ReplacingMergeTree,
+  ver: "updatedAt"  // Version column - keeps row with highest value
 });
 
 // "Update" by inserting a new version
@@ -83,7 +84,8 @@ await usersTable.insert([{ userId: 123, name: "John", status: "inactive" }]);
 from typing import Annotated
 from datetime import datetime
 from pydantic import BaseModel
-from moose_lib import Key, OlapTable, clickhouse_default
+from moose_lib import Key, OlapTable, OlapConfig, clickhouse_default
+from moose_lib.blocks import ReplacingMergeTreeEngine
 
 class User(BaseModel):
     user_id: Key[int]
@@ -92,10 +94,10 @@ class User(BaseModel):
     updated_at: Annotated[datetime, clickhouse_default("now()")]
 
 # Use ReplacingMergeTree engine for update patterns
-users_table = OlapTable[User]("users", {
-    "order_by_fields": ["user_id"],
-    "engine": "ReplacingMergeTree(updated_at)"  # Version column for deduplication
-})
+users_table = OlapTable[User]("users", OlapConfig(
+    order_by_fields=["user_id"],
+    engine=ReplacingMergeTreeEngine(ver="updated_at")  # Version column - keeps row with highest value
+))
 
 # "Update" by inserting a new version
 await users_table.insert([User(user_id=123, name="John", status="inactive")])

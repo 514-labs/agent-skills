@@ -45,7 +45,7 @@ interface Event {
 // Start simple - no partitioning
 export const eventsTable = new OlapTable<Event>("events", {
   orderByFields: ["eventType", "timestamp"]
-  // No partitionByField - add later if needed for lifecycle management
+  // No partitionBy - add later if needed for lifecycle management
 });
 ```
 

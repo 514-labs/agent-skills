@@ -33,12 +33,12 @@ ORDER BY (service, timestamp);
 // TypeScript - high cardinality partitioning causes "too many parts" errors
 export const eventsTable = new OlapTable<Event>("events", {
   orderByFields: ["timestamp"],
-  partitionByField: "userId"  // Millions of partitions - BAD!
+  partitionBy: "userId"  // Millions of partitions - BAD!
 });
 
 export const logsTable = new OlapTable<Log>("logs", {
   orderByFields: ["service", "timestamp"],
-  partitionByField: "toDate(timestamp)"  // 3650 partitions over 10 years - risky!
+  partitionBy: "toDate(timestamp)"  // 3650 partitions over 10 years - risky!
 });
 ```
 
@@ -84,7 +84,7 @@ interface Event {
 // Monthly partitions = 12 per year, bounded cardinality
 export const eventsTable = new OlapTable<Event>("events", {
   orderByFields: ["eventType", "timestamp"],
-  partitionByField: "toStartOfMonth(timestamp)"  // 12 partitions per year - GOOD!
+  partitionBy: "toStartOfMonth(timestamp)"  // 12 partitions per year - GOOD!
 });
 ```
 

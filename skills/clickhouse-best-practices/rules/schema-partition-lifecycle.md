@@ -34,7 +34,7 @@ DELETE FROM events WHERE timestamp < '2023-01-01';
 // TypeScript - partitioning by eventType makes time-based cleanup slow
 export const eventsTable = new OlapTable<Event>("events", {
   orderByFields: ["timestamp"],
-  partitionByField: "eventType"  // Cannot efficiently drop old data by time
+  partitionBy: "eventType"  // Cannot efficiently drop old data by time
 });
 ```
 
@@ -78,7 +78,7 @@ interface Event {
 
 export const eventsTable = new OlapTable<Event>("events", {
   orderByFields: ["eventType", "timestamp"],
-  partitionByField: "toStartOfMonth(timestamp)",  // Monthly partitions for easy lifecycle management
+  partitionBy: "toStartOfMonth(timestamp)",  // Monthly partitions for easy lifecycle management
   ttl: "timestamp + INTERVAL 1 YEAR DELETE"       // Auto-drop partitions older than 1 year
 });
 ```

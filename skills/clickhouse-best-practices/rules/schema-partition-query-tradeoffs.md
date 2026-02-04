@@ -46,7 +46,7 @@ interface Event {
 // Define table with time-based partitioning
 export const eventsTable = new OlapTable<Event>("events", {
   orderByFields: ["eventType", "timestamp"],
-  partitionByField: "toStartOfMonth(timestamp)"
+  partitionBy: "toStartOfMonth(timestamp)"
 });
 
 // Queries with timestamp filters will benefit from partition pruning

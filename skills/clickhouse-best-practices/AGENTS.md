@@ -1735,8 +1735,10 @@ SELECT * FROM events WHERE user_id = 12345;
 **MooseStack - Skipping indices in OlapTable:**
 
 ```python
-from moose_lib import Key, OlapTable
+from moose_lib import Key, OlapTable, OlapConfig
 from typing import Annotated
+from pydantic import BaseModel
+from datetime import datetime
 
 class Event(BaseModel):
     id: Key[str]
@@ -1744,13 +1746,13 @@ class Event(BaseModel):
     timestamp: datetime
     user_id: Annotated[int, "uint64"]  # Frequently filtered but not in ORDER BY
 
-events_table = OlapTable[Event]("events", {
-    "order_by_fields": ["event_type", "timestamp"],
+events_table = OlapTable[Event]("events", OlapConfig(
+    order_by_fields=["event_type", "timestamp"],
     # Add skipping index for non-ORDER BY filter column
-    "indexes": [
-        {"name": "idx_user_id", "column": "user_id", "type": "bloom_filter", "granularity": 4}
+    indexes=[
+        OlapConfig.TableIndex(name="idx_user_id", expression="user_id", type="bloom_filter", granularity=4)
     ]
-})
+))
 ```
 
 Reference: [https://clickhouse.com/docs/best-practices/use-data-skipping-indices-where-appropriate](https://clickhouse.com/docs/best-practices/use-data-skipping-indices-where-appropriate)
@@ -2018,7 +2020,8 @@ ALTER TABLE events DELETE WHERE toYYYYMM(timestamp) = 202301;
 from typing import Annotated
 from decimal import Decimal
 from pydantic import BaseModel
-from moose_lib import Key, OlapTable, clickhouse_decimal
+from moose_lib import Key, OlapTable, OlapConfig, clickhouse_decimal
+from moose_lib.blocks import CollapsingMergeTreeEngine
 
 class Order(BaseModel):
     order_id: Key[int]
@@ -2027,10 +2030,10 @@ class Order(BaseModel):
     sign: Annotated[int, "int8"]  # 1 = active, -1 = deleted
 
 # Use CollapsingMergeTree engine for soft delete patterns
-orders_table = OlapTable[Order]("orders", {
-    "order_by_fields": ["order_id"],
-    "engine": "CollapsingMergeTree(sign)"
-})
+orders_table = OlapTable[Order]("orders", OlapConfig(
+    order_by_fields=["order_id"],
+    engine=CollapsingMergeTreeEngine(sign="sign")  # Required sign column
+))
 
 # Insert order (sign = 1)
 await orders_table.insert([Order(order_id=123, customer_id=456, total=Decimal("99.99"), sign=1)])
@@ -2044,7 +2047,7 @@ await orders_table.insert([Order(order_id=123, customer_id=456, total=Decimal("9
 ```typescript
 export const eventsTable = new OlapTable<Event>("events", {
   orderByFields: ["eventType", "timestamp"],
-  partitionByField: "toStartOfMonth(timestamp)",
+  partitionBy: "toStartOfMonth(timestamp)",
   ttl: "timestamp + INTERVAL 90 DAY DELETE"  // Auto-delete old data
 });
 ```
@@ -2111,7 +2114,8 @@ FROM users GROUP BY user_id;
 from typing import Annotated
 from datetime import datetime
 from pydantic import BaseModel
-from moose_lib import Key, OlapTable, clickhouse_default
+from moose_lib import Key, OlapTable, OlapConfig, clickhouse_default
+from moose_lib.blocks import ReplacingMergeTreeEngine
 
 class User(BaseModel):
     user_id: Key[int]
@@ -2120,10 +2124,10 @@ class User(BaseModel):
     updated_at: Annotated[datetime, clickhouse_default("now()")]
 
 # Use ReplacingMergeTree engine for update patterns
-users_table = OlapTable[User]("users", {
-    "order_by_fields": ["user_id"],
-    "engine": "ReplacingMergeTree(updated_at)"  # Version column for deduplication
-})
+users_table = OlapTable[User]("users", OlapConfig(
+    order_by_fields=["user_id"],
+    engine=ReplacingMergeTreeEngine(ver="updated_at")  # Version column - keeps row with highest value
+))
 
 # "Update" by inserting a new version
 await users_table.insert([User(user_id=123, name="John", status="inactive")])

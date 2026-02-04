@@ -105,7 +105,7 @@ interface Event {
 
 export const eventsTable = new OlapTable<Event>("events", {
   orderByFields: ["userId", "eventDate", "eventId"],  // Matches query patterns
-  partitionByField: "toYYYYMM(eventDate)"
+  partitionBy: "toYYYYMM(eventDate)"
 });
 ```
 

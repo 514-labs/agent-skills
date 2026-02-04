@@ -90,14 +90,16 @@ export const eventsTable = new OlapTable<Event>("events", {
   orderByFields: ["eventType", "timestamp"],
   // Add skipping index for non-ORDER BY filter column
   indexes: [
-    { name: "idx_user_id", column: "userId", type: "bloom_filter", granularity: 4 }
+    { name: "idx_user_id", expression: "userId", type: "bloom_filter", granularity: 4 }
   ]
 });
 ```
 
 ```python
-from moose_lib import Key, OlapTable
+from moose_lib import Key, OlapTable, OlapConfig
 from typing import Annotated
+from pydantic import BaseModel
+from datetime import datetime
 
 class Event(BaseModel):
     id: Key[str]
@@ -105,13 +107,13 @@ class Event(BaseModel):
     timestamp: datetime
     user_id: Annotated[int, "uint64"]  # Frequently filtered but not in ORDER BY
 
-events_table = OlapTable[Event]("events", {
-    "order_by_fields": ["event_type", "timestamp"],
+events_table = OlapTable[Event]("events", OlapConfig(
+    order_by_fields=["event_type", "timestamp"],
     # Add skipping index for non-ORDER BY filter column
-    "indexes": [
-        {"name": "idx_user_id", "column": "user_id", "type": "bloom_filter", "granularity": 4}
+    indexes=[
+        OlapConfig.TableIndex(name="idx_user_id", expression="user_id", type="bloom_filter", granularity=4)
     ]
-})
+))
 ```
 
 Reference: [Use Data Skipping Indices Where Appropriate](https://clickhouse.com/docs/best-practices/use-data-skipping-indices-where-appropriate)

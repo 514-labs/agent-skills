@@ -74,7 +74,7 @@ ALTER TABLE events DELETE WHERE toYYYYMM(timestamp) = 202301;
 **MooseStack - CollapsingMergeTree for soft deletes:**
 
 ```typescript
-import { Key, UInt64, Int8, Decimal, OlapTable } from "@514labs/moose-lib";
+import { Key, UInt64, Int8, Decimal, OlapTable, ClickHouseEngines } from "@514labs/moose-lib";
 
 interface Order {
   orderId: Key<UInt64>;
@@ -86,7 +86,8 @@ interface Order {
 // Use CollapsingMergeTree engine for soft delete patterns
 export const ordersTable = new OlapTable<Order>("orders", {
   orderByFields: ["orderId"],
-  engine: "CollapsingMergeTree(sign)"
+  engine: ClickHouseEngines.CollapsingMergeTree,
+  sign: "sign"  // Required sign column
 });
 
 // Insert order (sign = 1)
@@ -100,7 +101,8 @@ await ordersTable.insert([{ orderId: 123, customerId: 456, total: "99.99", sign:
 from typing import Annotated
 from decimal import Decimal
 from pydantic import BaseModel
-from moose_lib import Key, OlapTable, clickhouse_decimal
+from moose_lib import Key, OlapTable, OlapConfig, clickhouse_decimal
+from moose_lib.blocks import CollapsingMergeTreeEngine
 
 class Order(BaseModel):
     order_id: Key[int]
@@ -109,10 +111,10 @@ class Order(BaseModel):
     sign: Annotated[int, "int8"]  # 1 = active, -1 = deleted
 
 # Use CollapsingMergeTree engine for soft delete patterns
-orders_table = OlapTable[Order]("orders", {
-    "order_by_fields": ["order_id"],
-    "engine": "CollapsingMergeTree(sign)"
-})
+orders_table = OlapTable[Order]("orders", OlapConfig(
+    order_by_fields=["order_id"],
+    engine=CollapsingMergeTreeEngine(sign="sign")  # Required sign column
+))
 
 # Insert order (sign = 1)
 await orders_table.insert([Order(order_id=123, customer_id=456, total=Decimal("99.99"), sign=1)])
@@ -126,7 +128,7 @@ await orders_table.insert([Order(order_id=123, customer_id=456, total=Decimal("9
 ```typescript
 export const eventsTable = new OlapTable<Event>("events", {
   orderByFields: ["eventType", "timestamp"],
-  partitionByField: "toStartOfMonth(timestamp)",
+  partitionBy: "toStartOfMonth(timestamp)",
   ttl: "timestamp + INTERVAL 90 DAY DELETE"  // Auto-delete old data
 });
 ```
