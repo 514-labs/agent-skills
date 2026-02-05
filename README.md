@@ -1,8 +1,8 @@
-# MooseStack ClickHouse Agent Skills
+# MooseStack Data Modeling Skills
 
-Agent Skills for building data applications with [MooseStack](https://docs.fiveonefour.com/moosestack) and ClickHouse. These skills help LLMs and agents adopt best practices when working with MooseStack data models, OlapTables, IngestPipelines, and ClickHouse queries.
+Agent Skills for building data applications with [MooseStack](https://docs.fiveonefour.com/moosestack). These skills help LLMs and agents adopt best practices when working with MooseStack data models, OlapTables, IngestPipelines, and ClickHouse queries — with TypeScript and Python examples for every rule.
 
-> Forked from [ClickHouse/agent-skills](https://github.com/ClickHouse/agent-skills) with MooseStack TypeScript and Python examples added to every rule.
+> Built on top of the excellent [ClickHouse/agent-skills](https://github.com/ClickHouse/agent-skills) — thank you to the ClickHouse team for the foundational best practices!
 
 ## Installation
 
