@@ -74,4 +74,46 @@ SELECT * FROM events WHERE user_id = 12345;
 -- Look for "Skip" in output showing granules skipped
 ```
 
+**MooseStack - Skipping indices in OlapTable:**
+
+```typescript
+import { Key, LowCardinality, UInt64, OlapTable } from "@514labs/moose-lib";
+
+interface Event {
+  id: Key<string>;
+  eventType: string & LowCardinality;
+  timestamp: Date;
+  userId: UInt64;  // Frequently filtered but not in ORDER BY
+}
+
+export const eventsTable = new OlapTable<Event>("events", {
+  orderByFields: ["eventType", "timestamp"],
+  // Add skipping index for non-ORDER BY filter column
+  indexes: [
+    { name: "idx_user_id", expression: "userId", type: "bloom_filter", granularity: 4 }
+  ]
+});
+```
+
+```python
+from moose_lib import Key, OlapTable, OlapConfig
+from typing import Annotated
+from pydantic import BaseModel
+from datetime import datetime
+
+class Event(BaseModel):
+    id: Key[str]
+    event_type: Annotated[str, "LowCardinality"]
+    timestamp: datetime
+    user_id: Annotated[int, "uint64"]  # Frequently filtered but not in ORDER BY
+
+events_table = OlapTable[Event]("events", OlapConfig(
+    order_by_fields=["event_type", "timestamp"],
+    # Add skipping index for non-ORDER BY filter column
+    indexes=[
+        OlapConfig.TableIndex(name="idx_user_id", expression="user_id", type="bloom_filter", granularity=4)
+    ]
+))
+```
+
 Reference: [Use Data Skipping Indices Where Appropriate](https://clickhouse.com/docs/best-practices/use-data-skipping-indices-where-appropriate)
