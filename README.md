@@ -7,7 +7,7 @@ Agent Skills for building data applications with [MooseStack](https://docs.fiveo
 ## Installation
 
 ```bash
-npx skills add 514-labs/moose-agent-skills
+npx skills add 514-labs/agent-skills
 ```
 
 The CLI auto-detects installed agents and prompts you to select where to install.
