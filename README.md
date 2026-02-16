@@ -1,71 +1,60 @@
-# MooseStack Data Modeling Skills
+# ClickHouse Best Practices (Typescript, Python) — Agent Skill
 
-Agent Skills for building data applications with [MooseStack](https://docs.fiveonefour.com/moosestack). These skills help LLMs and agents adopt best practices when working with MooseStack data models, OlapTables, IngestPipelines, and ClickHouse queries — with TypeScript and Python examples for every rule.
+Forked from [ClickHouse/agent-skills](https://github.com/ClickHouse/agent-skills), which provides 28 battle-tested rules for schema design, query optimization, and data ingestion — all in ClickHouse SQL. We extended every rule with [MooseStack](https://docs.fiveonefour.com/moosestack) TypeScript and Python examples so your agents apply the same discipline when writing application code, not just raw DDL.
 
-> Built on top of the excellent [ClickHouse/agent-skills](https://github.com/ClickHouse/agent-skills) — thank you to the ClickHouse team for the foundational best practices!
+## Why this exists
 
-## Installation
+Agents that write ClickHouse SQL benefit from the upstream skill. Agents that define data models in TypeScript or Python — declaring `OlapTable`, `IngestPipeline`, `MaterializedView` — need the same guidance translated into their language.
+
+This skill is one layer of what we call an **agentic harness**: the infrastructure interface that lets agents build on and operate your data stack correctly. [MooseStack](https://docs.fiveonefour.com/moosestack) provides the declarative framework; this skill teaches agents to use it well.
+
+## Install
 
 ```bash
 npx skills add 514-labs/agent-skills
 ```
 
-The CLI auto-detects installed agents and prompts you to select where to install.
+Works with Claude Code, Cursor, Copilot, Windsurf, Gemini CLI, Codex, and [20+ other agents](https://agentskills.io).
 
-## What is this?
+## What's inside
 
-Agent Skills are packaged instructions that extend AI coding agents (Claude Code, Cursor, Copilot, etc.) with domain-specific expertise. This repository provides skills for MooseStack applications—covering data model design, query optimization, and data ingestion patterns with TypeScript and Python examples.
+**28 rules**, each with ClickHouse SQL + MooseStack TypeScript + MooseStack Python examples:
 
-When an agent loads these skills, it gains knowledge of MooseStack and ClickHouse best practices and can apply them while helping you design data models, configure OlapTables, write queries, or troubleshoot performance issues.
+| Category | Rules | Impact | e.g. |
+|---|---|---|---|
+| Key ordering / `orderByFields` | 4 | CRITICAL | order columns low-to-high cardinality, prioritize filter columns |
+| Type selection | 5 | CRITICAL | prefer native types, minimize bit-width, avoid Nullable |
+| JOIN optimization | 5 | CRITICAL | filter before joining, ANY for single matches |
+| Insert batching | 1 | CRITICAL | 10K-100K rows per batch |
+| Mutation avoidance | 2 | CRITICAL | no ALTER TABLE UPDATE/DELETE |
+| Partitioning | 4 | HIGH | lifecycle management, keep cardinality under 1,000 |
+| Skipping indices | 1 | HIGH | bloom filters for non-ORDER BY filters |
+| Materialized views | 2 | HIGH | incremental for real-time, refreshable for batch |
+| Async inserts | 2 | HIGH | high-frequency small batches |
+| OPTIMIZE avoidance | 1 | HIGH | let merges happen naturally |
+| JSON usage | 1 | MEDIUM | use JSON type for dynamic schemas |
 
-Skills follow the open specification at [agentskills.io](https://agentskills.io).
+Browse the rules: [`skills/clickhouse-best-practices/`](./skills/clickhouse-best-practices/) | Human-friendly overview: [SKILL.md](./skills/clickhouse-best-practices/SKILL.md)
 
-## Available Skills
+**Docs:** [MooseStack](https://docs.fiveonefour.com/moosestack) | [ClickHouse](https://clickhouse.com/docs)
 
-### MooseStack ClickHouse Best Practices
+## Example prompts
 
-**28 rules** covering data model design, query optimization, and data ingestion—each with TypeScript and Python examples.
+> Here's a sample of our source data [paste schema or CSV header]. Our queries filter heavily by region and time range. Using the `clickhouse-best-practices-ts-py` skill, create an optimized TypeScript data model with the right `orderByFields`, partitioning, and type annotations. Use `moose query` to validate the table performs well for those access patterns.
 
-| Category | Rules | Impact |
-|----------|-------|--------|
-| orderByFields Selection | 4 | CRITICAL |
-| Type Annotations | 5 | CRITICAL |
-| JOIN Optimization | 5 | CRITICAL |
-| IngestPipeline / Batching | 1 | CRITICAL |
-| Mutation Avoidance | 2 | CRITICAL |
-| Partitioning Strategy | 4 | HIGH |
-| Skipping Indices | 1 | HIGH |
-| MaterializedViews | 2 | HIGH |
-| Async Inserts | 2 | HIGH |
-| OPTIMIZE Avoidance | 1 | HIGH |
-| JSON Usage | 1 | MEDIUM |
+> Using the `clickhouse-best-practices-ts-py` skill, review this `OlapTable` definition against the queries in our Next.js frontend at `app/dashboard/`. Are the `orderByFields` in the right order given actual filter and GROUP BY patterns? Should any string columns be `LowCardinality`? Is Nullable justified on these fields?
 
-**Location:** [`skills/clickhouse-best-practices/`](./skills/clickhouse-best-practices/)
+> I need to track order line items with frequent updates to fulfillment status. Using the `clickhouse-best-practices-ts-py` skill, what table engine and data model should I use to avoid mutations? Show me the TypeScript and Python versions.
 
-**For humans:** Read [SKILL.md](./skills/clickhouse-best-practices/SKILL.md) for an overview, or [AGENTS.md](./skills/clickhouse-best-practices/AGENTS.md) for the complete compiled guide.
+> Here's my Postgres data model [paste schema]. Using the `clickhouse-best-practices-ts-py` skill, translate it to an optimized ClickHouse TypeScript model — denormalize where it makes sense for OLAP reads. Then create a MaterializedView for tracking sub-brand performance by region and month.
 
-**For agents:** The skill activates automatically when you work with MooseStack—defining data models, configuring OlapTables, or designing IngestPipelines.
+You don't strictly need to name the skill — most agents will activate it automatically when they see ClickHouse or MooseStack context. We like to call it explicitly when we want a formal review against the full ruleset.
 
-## Quick Start
-
-After installation, your AI agent will reference these best practices when:
-
-- Defining MooseStack data models (TypeScript interfaces / Python Pydantic models)
-- Configuring `OlapTable` with `orderByFields`, `partitionByField`, `engine`
-- Choosing type annotations (`Key`, `UInt64`, `LowCardinality`, etc.)
-- Creating `IngestPipeline` configurations
-- Writing `Api` query handlers with ClickHouse SQL
-- Defining `MaterializedView` for incremental aggregations
-- Handling updates or deletes with specialized table engines
-
-Example prompt:
-> "Create a MooseStack data model for storing user events with fields for user_id, event_type, properties (JSON), and timestamp"
-
-The agent will apply relevant rules like proper type annotations, column ordering in `orderByFields`, and partitioning strategy.
+For best results, have `moose dev` running and connect the [MooseStack MCP server](https://docs.fiveonefour.com/moosestack/moosedev-mcp) to your agent. This lets the agent query your local ClickHouse, inspect infrastructure, and validate its recommendations against real data.
 
 ## Supported Agents
 
-Skills are **agent-agnostic**—the same skill works across all supported AI coding assistants:
+The installer auto-detects which agents you have. Skills are agent-agnostic — same skill, every assistant:
 
 | Agent | Config Directory |
 |-------|------------------|
@@ -80,10 +69,12 @@ Skills are **agent-agnostic**—the same skill works across all supported AI cod
 | [Roo Code](https://roo.ai) | `.roo/skills/` |
 | [OpenHands](https://github.com/All-Hands-AI/OpenHands) | `.openhands/skills/` |
 
-And 13 more including Amp, Kiro CLI, Trae, Zencoder, and others.
+And [13 more](https://agentskills.io).
 
-The installer detects which agents you have by checking for their configuration directories. If an agent isn't listed, either install it first or create its config directory manually (e.g., `mkdir -p ~/.cursor`).
+## Acknowledgments
+
+The ClickHouse team's [agent-skills](https://github.com/ClickHouse/agent-skills) repo did the hard work of codifying ClickHouse best practices into agent-consumable rules. This project wouldn't exist without it.
 
 ## License
 
-Apache 2.0 — see [LICENSE](./LICENSE) for details.
+Apache 2.0 — see [LICENSE](./LICENSE).

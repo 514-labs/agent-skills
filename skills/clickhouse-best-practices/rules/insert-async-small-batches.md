@@ -45,9 +45,9 @@ ALTER USER my_app_user SETTINGS
 - Time threshold `async_insert_busy_timeout_ms` elapses
 - Maximum insert queries accumulate
 
-**MooseStack - Stream-based buffering (preferred):**
+**MooseStack - Stream-based buffering (alternative approach):**
 
-MooseStack's IngestPipeline and Streams provide built-in buffering via Kafka, which is typically more robust than async inserts:
+MooseStack's IngestPipeline and Streams provide built-in buffering via Kafka. This is a different approach to the same problem — Kafka handles backpressure and durability at the stream level, while async inserts handle it at the ClickHouse level:
 
 ```typescript
 import { IngestPipeline } from "@514labs/moose-lib";

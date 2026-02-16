@@ -1,5 +1,5 @@
 ---
-name: moosestack-clickhouse-best-practices
+name: clickhouse-best-practices-ts-py
 description: MUST USE when reviewing MooseStack data models, ClickHouse schemas, queries, or configurations. Contains 28 rules with MooseStack TypeScript/Python examples. Always read relevant rule files and cite specific rules in responses.
 license: Apache-2.0
 metadata:
@@ -7,9 +7,9 @@ metadata:
   version: "0.3.0"
 ---
 
-# MooseStack ClickHouse Best Practices
+# ClickHouse Best Practices (TypeScript, Python)
 
-Comprehensive guidance for ClickHouse in MooseStack applications covering data model design, query optimization, and data ingestion. Contains 28 rules across 3 main categories (schema, query, insert), prioritized by impact. Each rule includes MooseStack TypeScript and Python examples.
+ClickHouse data modeling best practices extended with MooseStack TypeScript and Python examples. 28 rules across 3 categories (schema, query, insert), prioritized by impact.
 
 > **MooseStack docs:** [MooseStack Documentation](https://docs.fiveonefour.com/moosestack)
 > **ClickHouse docs:** [ClickHouse Best Practices](https://clickhouse.com/docs/best-practices)
