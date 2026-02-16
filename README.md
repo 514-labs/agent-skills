@@ -2,6 +2,14 @@
 
 Forked from [ClickHouse/agent-skills](https://github.com/ClickHouse/agent-skills), which provides 28 battle-tested rules for schema design, query optimization, and data ingestion — all in ClickHouse SQL. We extended every rule with [MooseStack](https://docs.fiveonefour.com/moosestack) TypeScript and Python examples so your agents apply the same discipline when writing application code, not just raw DDL.
 
+## What you're building
+
+Teams use MooseStack + ClickHouse to ship analytics features inside their applications — the kind of features where performance, schema design, and data modeling directly impact the end user. This skill makes sure your agents get those decisions right from the start.
+
+**Fast, customer-facing dashboards.** Your users expect interactive charts and filters that respond in milliseconds, not seconds. When analytical queries outgrow your transactional database, moving them to ClickHouse yields [10–100x faster dashboards](https://docs.fiveonefour.com/guides/performant-dashboards) — but only if the schema is designed for your actual access patterns. This skill teaches agents to choose the right `orderByFields`, partitioning, and types so the data model performs well from day one.
+
+**Data-connected chat in your app.** LLMs can now query your database through [MCP](https://docs.fiveonefour.com/guides/chat-in-your-app), turning natural language into live analytics. The quality of those answers depends on how your data is modeled: clean schemas, well-chosen types, and materialized views that pre-aggregate the right dimensions. This skill ensures agents build chat-ready data models that return fast, accurate results.
+
 ## Why this exists
 
 Agents that write ClickHouse SQL benefit from the upstream skill. Agents that define data models in TypeScript or Python — declaring `OlapTable`, `IngestPipeline`, `MaterializedView` — need the same guidance translated into their language.
