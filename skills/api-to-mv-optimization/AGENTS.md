@@ -6,6 +6,14 @@
 
 Requires a completed context map from `dashboard-preflight`. Do not start without validated inputs.
 
+## Compose With
+
+Read `clickhouse-best-practices` rules at each step. Key cross-references:
+- **Step 1 (Strategy):** `query-mv-incremental`, `query-mv-refreshable`
+- **Step 2 (Serving table):** `schema-pk-plan-before-creation`, `schema-pk-cardinality-order`, `schema-pk-prioritize-filters`, `schema-pk-filter-on-orderby`, `schema-types-lowcardinality`, `schema-types-minimize-bitwidth`, `schema-partition-start-without`
+- **Step 3 (MVs):** `query-mv-incremental`, `insert-optimize-avoid-final`
+- **Step 5 (API):** `schema-pk-filter-on-orderby`
+
 ## Overview
 
 This skill provides a guided workflow for converting ClickHouse API queries into pre-aggregated MaterializedView architectures. It contains 5 rules focused on MV design and verification.
