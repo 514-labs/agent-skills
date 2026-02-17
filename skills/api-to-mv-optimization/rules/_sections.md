@@ -1,11 +1,5 @@
 # Rule Sections
 
-## Input Validation
-- mv-validate-inputs
-
-## Access Pattern Analysis
-- mv-extract-access-patterns
-
 ## Strategy Selection
 - mv-select-strategy
 

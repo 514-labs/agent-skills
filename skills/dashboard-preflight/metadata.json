@@ -1,0 +1,10 @@
+{
+  "version": "0.1.0",
+  "organization": "514 Labs",
+  "date": "February 2026",
+  "abstract": "Reusable preflight skill for all MooseStack dashboard tasks. Discovers project structure, validates target API and source tables, extracts access patterns, and produces a context map consumed by downstream skills (optimization, SQL authoring, QA, integration, release safety).",
+  "references": [
+    "https://docs.fiveonefour.com/moosestack",
+    "https://clickhouse.com/docs"
+  ]
+}

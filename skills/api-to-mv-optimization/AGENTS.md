@@ -2,19 +2,17 @@
 
 > Auto-generated reference for AI coding agents. See SKILL.md for the review procedure.
 
+## Prerequisite
+
+Requires a completed context map from `dashboard-preflight`. Do not start without validated inputs.
+
 ## Overview
 
-This skill provides a guided workflow for converting ClickHouse API queries into pre-aggregated MaterializedView architectures. It contains 6 rules organized as a sequential workflow.
+This skill provides a guided workflow for converting ClickHouse API queries into pre-aggregated MaterializedView architectures. It contains 4 rules focused on MV design decisions.
 
 ## Rules
 
 ### CRITICAL
-
-#### mv-validate-inputs
-Validate API and Source Tables Before Designing MVs. Prevents wasted design effort on incomplete or stale inputs. Always confirm the API file, all source table models, and access patterns exist before proceeding with MV design.
-
-#### mv-extract-access-patterns
-Extract Access Patterns from the API Query. The serving table's grain, ORDER BY, and MV SELECT are all derived from the API's access patterns. List every WHERE filter, GROUP BY column, aggregate function, and per-metric branch.
 
 #### mv-design-serving-table
 Design the Serving Table Grain and ORDER BY from Access Patterns. Grain: one row per (tenant dimensions, metric type, time bucket, dimension value). ORDER BY: equality filters first, then time, then search/group-by dimensions. Use MergeTree for immutable rollups.
@@ -33,10 +31,9 @@ Use Zero/Empty Defaults for Fan-In Union Schema. Each MV SELECT must produce the
 ## Quick Reference
 
 ```
-Step 1: Validate inputs          → mv-validate-inputs
-Step 2: Extract access patterns  → mv-extract-access-patterns
-Step 3: Select strategy          → mv-select-strategy
-Step 4: Design serving table     → mv-design-serving-table + mv-fan-in-schema
-Step 5: Plan MVs                 → mv-write-time-aggregation
-Step 6: Update API               → (manual: rewrite query to read from serving table)
+Preflight: dashboard-preflight  → context map with validated inputs + access patterns
+Step 1: Select strategy         → mv-select-strategy
+Step 2: Design serving table    → mv-design-serving-table + mv-fan-in-schema
+Step 3: Plan MVs                → mv-write-time-aggregation
+Step 4: Update API              → (manual: rewrite query to read from serving table)
 ```
