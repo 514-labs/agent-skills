@@ -46,7 +46,17 @@ Per `mv-write-time-aggregation`:
 3. Pre-aggregate at the chosen time bucket using `toStartOfInterval`
 4. Use `sum`, `count`, etc. — not `-State`/`-Merge` unless using `AggregatingMergeTree`
 
-### Step 4 — Update the API
+### Step 4 — Verify Correctness
+
+Per `mv-verify-correctness`, do not rewrite the API until all three checks pass:
+
+1. **Infrastructure** — serving table and all MVs exist in `system.tables`
+2. **Population** — insert a test row into each source table, verify it appears in the serving table with correct metric label and zero/empty defaults
+3. **Aggregation parity** — for the same filters, raw source table aggregation and serving table aggregation produce identical results
+
+For fan-in topologies, test each branch independently before testing combined results.
+
+### Step 5 — Update the API
 
 Rewrite the API query to read from the serving table instead of raw source tables. The serving table's grain and ORDER BY should make the query a simple scan with no heavy aggregation.
 
@@ -58,3 +68,4 @@ Rewrite the API query to read from the serving table instead of raw source table
 | 2 | `mv-design-serving-table` | CRITICAL |
 | 3 | `mv-fan-in-schema` | HIGH |
 | 4 | `mv-write-time-aggregation` | CRITICAL |
+| 5 | `mv-verify-correctness` | CRITICAL |

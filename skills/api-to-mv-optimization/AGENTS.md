@@ -8,7 +8,7 @@ Requires a completed context map from `dashboard-preflight`. Do not start withou
 
 ## Overview
 
-This skill provides a guided workflow for converting ClickHouse API queries into pre-aggregated MaterializedView architectures. It contains 4 rules focused on MV design decisions.
+This skill provides a guided workflow for converting ClickHouse API queries into pre-aggregated MaterializedView architectures. It contains 5 rules focused on MV design and verification.
 
 ## Rules
 
@@ -28,6 +28,9 @@ Choose the Right MV Strategy for Your Source Topology. Four strategies: fan-in (
 #### mv-fan-in-schema
 Use Zero/Empty Defaults for Fan-In Union Schema. Each MV SELECT must produce the exact target schema. Use `''` for missing String columns, `toFloat64(0)` for missing numeric columns. Column order must match the target table.
 
+#### mv-verify-correctness
+Verify MV Population and Aggregation Parity Before Updating the API. Three checks: infrastructure (tables + views exist), population (insert triggers MV), aggregation parity (serving table matches raw table results). For fan-in, test each branch independently. Do not update the API until all checks pass.
+
 ## Quick Reference
 
 ```
@@ -35,5 +38,6 @@ Preflight: dashboard-preflight  → context map with validated inputs + access p
 Step 1: Select strategy         → mv-select-strategy
 Step 2: Design serving table    → mv-design-serving-table + mv-fan-in-schema
 Step 3: Plan MVs                → mv-write-time-aggregation
-Step 4: Update API              → (manual: rewrite query to read from serving table)
+Step 4: Verify correctness      → mv-verify-correctness
+Step 5: Update API              → (manual: rewrite query to read from serving table)
 ```

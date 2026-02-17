@@ -9,3 +9,6 @@
 
 ## Materialized View Implementation
 - mv-write-time-aggregation
+
+## Verification
+- mv-verify-correctness
