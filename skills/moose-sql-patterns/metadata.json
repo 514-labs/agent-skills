@@ -1,0 +1,12 @@
+{
+  "version": "0.1.0",
+  "organization": "514 Labs",
+  "date": "February 2026",
+  "mooseStackVersion": "1.0+",
+  "clickhouseVersion": "24.1+",
+  "abstract": "Rules for writing safe, correct dynamic ClickHouse queries in MooseStack using the sql template tag. Covers parameterization, identifier safety, dynamic WHERE/GROUP BY/ORDER BY construction, allow-list validation, and input parsing. Derived from production MooseStack API handlers.",
+  "references": [
+    "https://docs.fiveonefour.com/moosestack",
+    "https://clickhouse.com/docs"
+  ]
+}
