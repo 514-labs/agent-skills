@@ -61,16 +61,7 @@ Per `mv-write-time-aggregation`:
 3. Pre-aggregate at the chosen time bucket using `toStartOfInterval`
 4. Use `sum`, `count`, etc. — not `-State`/`-Merge` unless using `AggregatingMergeTree`
 
-### Step 6 — Create the Context Map
-
-Per `mv-create-context-map`:
-
-1. Document input validation results
-2. Document serving table + MV design with rationale
-3. Document tradeoffs and known limitations
-4. Write to a `context/context-map.md` alongside the implementation
-
-### Step 7 — Update the API
+### Step 6 — Update the API
 
 Rewrite the API query to read from the serving table instead of raw source tables. The serving table's grain and ORDER BY should make the query a simple scan with no heavy aggregation.
 
@@ -84,4 +75,3 @@ Rewrite the API query to read from the serving table instead of raw source table
 | 4 | `mv-design-serving-table` | CRITICAL |
 | 5 | `mv-fan-in-schema` | HIGH |
 | 6 | `mv-write-time-aggregation` | CRITICAL |
-| 7 | `mv-create-context-map` | MEDIUM |

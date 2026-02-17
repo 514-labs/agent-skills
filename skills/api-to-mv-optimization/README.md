@@ -27,7 +27,6 @@ When your ClickHouse API scans raw event tables and aggregates on every request,
 | `mv-design-serving-table` | CRITICAL | Design grain and ORDER BY from access patterns |
 | `mv-fan-in-schema` | HIGH | Use zero/empty defaults for union schema across fan-in MVs |
 | `mv-write-time-aggregation` | CRITICAL | Pre-aggregate at insert time with time bucketing |
-| `mv-create-context-map` | MEDIUM | Document the design rationale in a context map |
 
 ## Workflow
 
@@ -36,8 +35,7 @@ When your ClickHouse API scans raw event tables and aggregates on every request,
 3. **Select strategy** — choose MV topology based on source structure
 4. **Design serving table** — define grain, engine, ORDER BY
 5. **Plan MVs** — one MV per source (fan-in) or per shape (fan-out)
-6. **Create context map** — document decisions and tradeoffs
-7. **Update API** — rewrite query to read from serving table
+6. **Update API** — rewrite query to read from serving table
 
 ## Origin
 

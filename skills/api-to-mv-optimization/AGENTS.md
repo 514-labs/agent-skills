@@ -4,7 +4,7 @@
 
 ## Overview
 
-This skill provides a guided workflow for converting ClickHouse API queries into pre-aggregated MaterializedView architectures. It contains 7 rules organized as a sequential workflow.
+This skill provides a guided workflow for converting ClickHouse API queries into pre-aggregated MaterializedView architectures. It contains 6 rules organized as a sequential workflow.
 
 ## Rules
 
@@ -30,11 +30,6 @@ Choose the Right MV Strategy for Your Source Topology. Four strategies: fan-in (
 #### mv-fan-in-schema
 Use Zero/Empty Defaults for Fan-In Union Schema. Each MV SELECT must produce the exact target schema. Use `''` for missing String columns, `toFloat64(0)` for missing numeric columns. Column order must match the target table.
 
-### MEDIUM
-
-#### mv-create-context-map
-Create a Context Map Documenting the MV Design. Write to `context/context-map.md` with sections for input validation, serving table design, MV plan, and tradeoffs. Enables future maintainers to understand rationale without re-analysis.
-
 ## Quick Reference
 
 ```
@@ -43,6 +38,5 @@ Step 2: Extract access patterns  → mv-extract-access-patterns
 Step 3: Select strategy          → mv-select-strategy
 Step 4: Design serving table     → mv-design-serving-table + mv-fan-in-schema
 Step 5: Plan MVs                 → mv-write-time-aggregation
-Step 6: Create context map       → mv-create-context-map
-Step 7: Update API               → (manual: rewrite query to read from serving table)
+Step 6: Update API               → (manual: rewrite query to read from serving table)
 ```
