@@ -1,20 +1,6 @@
-# ClickHouse Best Practices (Typescript, Python) — Agent Skill
+# Agent Skills — MooseStack + ClickHouse
 
-Forked from [ClickHouse/agent-skills](https://github.com/ClickHouse/agent-skills), which provides 28 battle-tested rules for schema design, query optimization, and data ingestion — all in ClickHouse SQL. We extended every rule with [MooseStack](https://docs.fiveonefour.com/moosestack) TypeScript and Python examples so your agents apply the same discipline when writing application code, not just raw DDL.
-
-## What you're building
-
-Teams use MooseStack + ClickHouse to ship analytics features inside their applications — the kind of features where performance, schema design, and data modeling directly impact the end user. This skill makes sure your agents get those decisions right from the start.
-
-**Fast, customer-facing dashboards.** Your users expect interactive charts and filters that respond in milliseconds, not seconds. When analytical queries outgrow your transactional database, moving them to ClickHouse yields [10–100x faster dashboards](https://docs.fiveonefour.com/guides/performant-dashboards) — but only if the schema is designed for your actual access patterns. This skill teaches agents to choose the right `orderByFields`, partitioning, and types so the data model performs well from day one.
-
-**Data-connected chat in your app.** LLMs can now query your database through [MCP](https://docs.fiveonefour.com/guides/chat-in-your-app), turning natural language into live analytics. The quality of those answers depends on how your data is modeled: clean schemas, well-chosen types, and materialized views that pre-aggregate the right dimensions. This skill ensures agents build chat-ready data models that return fast, accurate results.
-
-## Why this exists
-
-Agents that write ClickHouse SQL benefit from the upstream skill. Agents that define data models in TypeScript or Python — declaring `OlapTable`, `IngestPipeline`, `MaterializedView` — need the same guidance translated into their language.
-
-This skill is one layer of what we call an **agentic harness**: the infrastructure interface that lets agents build on and operate your data stack correctly. [MooseStack](https://docs.fiveonefour.com/moosestack) provides the declarative framework; this skill teaches agents to use it well.
+A collection of skills that extend AI coding agents with domain-specific expertise for building data applications with [MooseStack](https://docs.fiveonefour.com/moosestack) and [ClickHouse](https://clickhouse.com/docs).
 
 ## Install
 
@@ -24,7 +10,28 @@ npx skills add 514-labs/agent-skills
 
 Works with Claude Code, Cursor, Copilot, Windsurf, Gemini CLI, Codex, and [20+ other agents](https://agentskills.io).
 
-## What's inside
+## Skills
+
+| Skill | Type | Description |
+|-------|------|-------------|
+| [`clickhouse-best-practices`](./skills/clickhouse-best-practices/) | Reference (28 rules) | Schema design, query optimization, and data ingestion best practices — ClickHouse SQL + MooseStack TypeScript & Python |
+| [`perf-optimize`](./skills/perf-optimize/) | Workflow (5 stages) | Guided performance optimization: profile a deployment, identify bottlenecks, apply fixes, verify on preview, ship a PR |
+
+---
+
+## clickhouse-best-practices
+
+Forked from [ClickHouse/agent-skills](https://github.com/ClickHouse/agent-skills), which provides 28 battle-tested rules for schema design, query optimization, and data ingestion — all in ClickHouse SQL. We extended every rule with [MooseStack](https://docs.fiveonefour.com/moosestack) TypeScript and Python examples so your agents apply the same discipline when writing application code, not just raw DDL.
+
+### What you're building
+
+Teams use MooseStack + ClickHouse to ship analytics features inside their applications — the kind of features where performance, schema design, and data modeling directly impact the end user. This skill makes sure your agents get those decisions right from the start.
+
+**Fast, customer-facing dashboards.** Your users expect interactive charts and filters that respond in milliseconds, not seconds. When analytical queries outgrow your transactional database, moving them to ClickHouse yields [10–100x faster dashboards](https://docs.fiveonefour.com/guides/performant-dashboards) — but only if the schema is designed for your actual access patterns. This skill teaches agents to choose the right `orderByFields`, partitioning, and types so the data model performs well from day one.
+
+**Data-connected chat in your app.** LLMs can now query your database through [MCP](https://docs.fiveonefour.com/guides/chat-in-your-app), turning natural language into live analytics. The quality of those answers depends on how your data is modeled: clean schemas, well-chosen types, and materialized views that pre-aggregate the right dimensions. This skill ensures agents build chat-ready data models that return fast, accurate results.
+
+### What's inside
 
 **28 rules**, each with ClickHouse SQL + MooseStack TypeScript + MooseStack Python examples:
 
@@ -44,9 +51,7 @@ Works with Claude Code, Cursor, Copilot, Windsurf, Gemini CLI, Codex, and [20+ o
 
 Browse the rules: [`skills/clickhouse-best-practices/`](./skills/clickhouse-best-practices/) | Human-friendly overview: [SKILL.md](./skills/clickhouse-best-practices/SKILL.md)
 
-**Docs:** [MooseStack](https://docs.fiveonefour.com/moosestack) | [ClickHouse](https://clickhouse.com/docs)
-
-## Example prompts
+### Example prompts
 
 > Here's a sample of our source data [paste schema or CSV header]. Our queries filter heavily by region and time range. Using the `clickhouse-best-practices-ts-py` skill, create an optimized TypeScript data model with the right `orderByFields`, partitioning, and type annotations. Use `moose query` to validate the table performs well for those access patterns.
 
@@ -54,11 +59,43 @@ Browse the rules: [`skills/clickhouse-best-practices/`](./skills/clickhouse-best
 
 > I need to track order line items with frequent updates to fulfillment status. Using the `clickhouse-best-practices-ts-py` skill, what table engine and data model should I use to avoid mutations? Show me the TypeScript and Python versions.
 
-> Here's my Postgres data model [paste schema]. Using the `clickhouse-best-practices-ts-py` skill, translate it to an optimized ClickHouse TypeScript model — denormalize where it makes sense for OLAP reads. Then create a MaterializedView for tracking sub-brand performance by region and month.
-
 You don't strictly need to name the skill — most agents will activate it automatically when they see ClickHouse or MooseStack context. We like to call it explicitly when we want a formal review against the full ruleset.
 
 For best results, have `moose dev` running and connect the [MooseStack MCP server](https://docs.fiveonefour.com/moosestack/moosedev-mcp) to your agent. This lets the agent query your local ClickHouse, inspect infrastructure, and validate its recommendations against real data.
+
+---
+
+## perf-optimize
+
+A **workflow skill** that guides an agent through profiling and optimizing ClickHouse performance in a 514/Moose deployment. Instead of passive reference rules, this skill drives the agent through a five-stage process end to end.
+
+### Stages
+
+| Stage | Goal |
+|-------|------|
+| **SETUP** | Authenticate with 514 CLI, identify the target project and active deployment |
+| **PROFILE** | Fetch schema and query data, analyze against an optimization checklist, produce a plan |
+| **OPTIMIZE** | Apply approved changes, push a branch to trigger a preview deployment |
+| **VERIFY** | Compare before/after metrics on the preview deployment |
+| **SHIP** | Create a PR with performance evidence |
+
+### Usage
+
+```
+/perf-optimize [project-slug]
+```
+
+If a project slug is provided, the agent skips the project selection prompt. Otherwise it lists available projects and asks the user to choose.
+
+### Prerequisites
+
+- **514 CLI** — authenticated (`514 auth login`)
+- **gh CLI** — for creating the pull request
+- A 514/Moose project with at least one active deployment
+
+**Docs:** [MooseStack](https://docs.fiveonefour.com/moosestack) | [ClickHouse](https://clickhouse.com/docs)
+
+---
 
 ## Supported Agents
 

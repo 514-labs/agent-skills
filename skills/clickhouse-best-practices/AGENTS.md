@@ -207,7 +207,7 @@ class Event(BaseModel):
 # Start simple - no partitioning
 events_table = OlapTable[Event]("events", {
     "order_by_fields": ["event_type", "timestamp"]
-    # No partition_by_field - add later if needed for lifecycle management
+    # No partition_by - add later if needed for lifecycle management
 })
 ```
 
@@ -326,12 +326,12 @@ ORDER BY (service, timestamp);
 # Python - high cardinality partitioning causes "too many parts" errors
 events_table = OlapTable[Event]("events", {
     "order_by_fields": ["timestamp"],
-    "partition_by_field": "user_id"  # Millions of partitions - BAD!
+    "partition_by": "user_id"  # Millions of partitions - BAD!
 })
 
 logs_table = OlapTable[Log]("logs", {
     "order_by_fields": ["service", "timestamp"],
-    "partition_by_field": "toDate(timestamp)"  # 3650 partitions over 10 years - risky!
+    "partition_by": "toDate(timestamp)"  # 3650 partitions over 10 years - risky!
 })
 ```
 
@@ -366,7 +366,7 @@ class Event(BaseModel):
 # Monthly partitions = 12 per year, bounded cardinality
 events_table = OlapTable[Event]("events", {
     "order_by_fields": ["event_type", "timestamp"],
-    "partition_by_field": "toStartOfMonth(timestamp)"  # 12 partitions per year - GOOD!
+    "partition_by": "toStartOfMonth(timestamp)"  # 12 partitions per year - GOOD!
 })
 ```
 
@@ -653,7 +653,7 @@ class Event(BaseModel):
 
 events_table = OlapTable[Event]("events", {
     "order_by_fields": ["user_id", "event_date", "event_id"],  # Matches query patterns
-    "partition_by_field": "toYYYYMM(event_date)"
+    "partition_by": "toYYYYMM(event_date)"
 })
 ```
 
@@ -781,7 +781,7 @@ class Event(BaseModel):
 # Define table with time-based partitioning
 events_table = OlapTable[Event]("events", {
     "order_by_fields": ["event_type", "timestamp"],
-    "partition_by_field": "toStartOfMonth(timestamp)"
+    "partition_by": "toStartOfMonth(timestamp)"
 })
 
 # Queries with timestamp filters will benefit from partition pruning
@@ -1155,11 +1155,12 @@ CREATE TABLE events (
 ```python
 from typing import Annotated
 from datetime import datetime
+from uuid import UUID
 from pydantic import BaseModel
-from moose_lib import Key, OlapTable, clickhouse_default
+from moose_lib import OlapTable, clickhouse_default
 
 class Event(BaseModel):
-    event_id: Key[str]                                              # UUID - 16 bytes
+    event_id: UUID                                                  # UUID - 16 bytes native storage
     user_id: Annotated[int, "uint64"]                               # UInt64 - 8 bytes, numeric ops
     created_at: Annotated[datetime, clickhouse_default("now()")]    # DateTime - 4 bytes
     count: Annotated[int, "uint32", clickhouse_default("0")]        # UInt32 - 4 bytes, math works
@@ -1174,7 +1175,7 @@ events_table = OlapTable[Event]("events")
 
 |------|------------|--------|
 
-| UUID | `Key<string>` or `string` | `Key[str]` or `str` |
+| UUID | `string & tags.Format<"uuid">` (typia) | `UUID` (from uuid) |
 
 | Sequential ID | `UInt32` / `UInt64` | `Annotated[int, "uint32"]` |
 
@@ -1247,7 +1248,7 @@ DELETE FROM events WHERE timestamp < '2023-01-01';
 # Python - partitioning by event_type makes time-based cleanup slow
 events_table = OlapTable[Event]("events", {
     "order_by_fields": ["timestamp"],
-    "partition_by_field": "event_type"  # Cannot efficiently drop old data by time
+    "partition_by": "event_type"  # Cannot efficiently drop old data by time
 })
 ```
 
@@ -1285,7 +1286,7 @@ class Event(BaseModel):
 
 events_table = OlapTable[Event]("events", {
     "order_by_fields": ["event_type", "timestamp"],
-    "partition_by_field": "toStartOfMonth(timestamp)",  # Monthly partitions for easy lifecycle management
+    "partition_by": "toStartOfMonth(timestamp)",  # Monthly partitions for easy lifecycle management
     "ttl": "timestamp + INTERVAL 1 YEAR DELETE"         # Auto-drop partitions older than 1 year
 })
 ```
@@ -2337,7 +2338,7 @@ ALTER USER my_app_user SETTINGS
 
 - Maximum insert queries accumulate
 
-**MooseStack - Stream-based buffering (preferred):**
+**MooseStack - Stream-based buffering (alternative approach):**
 
 ```python
 from moose_lib import IngestPipeline, IngestPipelineConfig
@@ -2351,7 +2352,7 @@ pipeline = IngestPipeline[Event]("events", IngestPipelineConfig(
 # Each API call is buffered via Kafka - no async_insert needed
 ```
 
-MooseStack's IngestPipeline and Streams provide built-in buffering via Kafka, which is typically more robust than async inserts:
+MooseStack's IngestPipeline and Streams provide built-in buffering via Kafka. This is a different approach to the same problem — Kafka handles backpressure and durability at the stream level, while async inserts handle it at the ClickHouse level:
 
 **When to use async_insert vs MooseStack streams:**
 

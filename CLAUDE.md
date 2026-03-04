@@ -4,7 +4,10 @@ This file provides guidance to AI coding agents working with this repository.
 
 ## Repository Purpose
 
-This is an **Agent Skills** repository providing **MooseStack + ClickHouse best practices**. It extends AI coding agents (Claude Code, Cursor, Copilot, etc.) with domain-specific expertise for building data applications with MooseStack.
+This is an **Agent Skills** repository providing expertise for building data applications with [MooseStack](https://docs.fiveonefour.com/moosestack) and ClickHouse. It contains two types of skills:
+
+- **Reference skills** — rule-based collections with a build pipeline (e.g., `clickhouse-best-practices`)
+- **Workflow skills** — single-file guides that drive an agent through a multi-stage process (e.g., `perf-optimize`)
 
 > Forked from [ClickHouse/agent-skills](https://github.com/ClickHouse/agent-skills) with MooseStack TypeScript and Python examples added to every rule.
 
@@ -15,15 +18,19 @@ Skills follow the open specification at [agentskills.io](https://agentskills.io)
 ```
 agent-skills/
 ├── skills/
-│   └── clickhouse-best-practices/    # The skill
-│       ├── SKILL.md                  # Quick reference for agents (manually maintained)
-│       ├── AGENTS.md                 # Complete compiled guide (GENERATED - do not edit)
+│   ├── clickhouse-best-practices/    # Reference skill (28 rules + build pipeline)
+│   │   ├── SKILL.md                  # Quick reference for agents (manually maintained)
+│   │   ├── AGENTS.md                 # Complete compiled guide (GENERATED - do not edit)
+│   │   ├── metadata.json             # Version, organization, abstract
+│   │   ├── README.md                 # User documentation
+│   │   └── rules/                    # Individual rule files (source of truth)
+│   │       ├── _template.md          # Template for new rules
+│   │       ├── _sections.md          # Section definitions
+│   │       └── *.md                  # Rule files
+│   └── perf-optimize/                # Workflow skill (single SKILL.md)
+│       ├── SKILL.md                  # Complete workflow (5 stages)
 │       ├── metadata.json             # Version, organization, abstract
-│       ├── README.md                 # User documentation
-│       └── rules/                    # Individual rule files (source of truth)
-│           ├── _template.md          # Template for new rules
-│           ├── _sections.md          # Section definitions
-│           └── *.md                  # Rule files
+│       └── README.md                 # Maintainer guide
 ├── packages/
 │   └── clickhouse-best-practices-build/   # Build tooling (Bun/TypeScript)
 │       └── src/
@@ -244,3 +251,9 @@ This updates `metadata.json` and `SKILL.md` frontmatter.
 
 ### Update SKILL.md
 Edit manually - this is the quick reference that agents see first. Keep it under 500 lines.
+
+## Workflow Skills
+
+The `perf-optimize` skill is a **workflow skill** — a single `SKILL.md` that guides an agent through a multi-stage process. It has no `rules/` directory, no build step, and no generated `AGENTS.md`.
+
+To edit it, modify `skills/perf-optimize/SKILL.md` directly. No regeneration or validation commands are needed.
