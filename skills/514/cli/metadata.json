@@ -1,0 +1,9 @@
+{
+  "version": "0.1.0",
+  "organization": "514 Labs",
+  "date": "March 2026",
+  "abstract": "Basic 514 CLI flow — logging in, linking a project, checking deployments, and browsing docs.",
+  "references": [
+    "https://docs.fiveonefour.com"
+  ]
+}

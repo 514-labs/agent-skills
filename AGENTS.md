@@ -4,7 +4,10 @@ This file provides guidance to AI coding agents (Claude Code, Cursor, Copilot, e
 
 ## Repository Overview
 
-A collection of skills for AI agents working with MooseStack applications and ClickHouse databases. Skills are packaged instructions and guidelines that extend agent capabilities for data model design, query optimization, and operational best practices. Each rule includes TypeScript and Python examples for MooseStack.
+A collection of skills for AI agents working with MooseStack applications and ClickHouse databases. The repo contains two types of skills:
+
+- **Reference skills** — rule-based collections with a build pipeline that generates compiled documentation (e.g., `clickhouse-best-practices`)
+- **Workflow skills** — single-file `SKILL.md` guides that drive an agent through a multi-stage process (e.g., `perf-optimize`)
 
 > Forked from [ClickHouse/agent-skills](https://github.com/ClickHouse/agent-skills) with MooseStack examples added.
 
@@ -13,15 +16,29 @@ A collection of skills for AI agents working with MooseStack applications and Cl
 ```
 agent-skills/
 ├── skills/
-│   └── clickhouse-best-practices/   # MooseStack + ClickHouse optimization
-│       ├── SKILL.md                 # Skill definition (overview)
-│       ├── AGENTS.md                # Full compiled guide (generated)
-│       ├── metadata.json            # Version, organization, abstract
-│       ├── README.md                # Maintainer guide
-│       └── rules/                   # Individual rule files with TS/PY examples
-│           ├── _sections.md         # Section metadata
-│           ├── _template.md         # Template for new rules
-│           └── *.md                 # Rule files (e.g., query-join-filter-before.md)
+│   ├── 514/                         # 514 platform skills
+│   │   ├── cli/                     # Workflow skill: 514 CLI basics
+│   │   │   ├── SKILL.md             # CLI flow guide
+│   │   │   ├── metadata.json        # Version, organization, abstract
+│   │   │   └── README.md            # Maintainer guide
+│   │   ├── debug/                   # Workflow skill: deployment debugging
+│   │   │   ├── SKILL.md             # Debugging guide (5 sections)
+│   │   │   ├── metadata.json        # Version, organization, abstract
+│   │   │   └── README.md            # Maintainer guide
+│   │   └── perf-optimize/           # Workflow skill: guided perf optimization
+│   │       ├── SKILL.md             # Complete workflow (5 stages)
+│   │       ├── metadata.json        # Version, organization, abstract
+│   │       └── README.md            # Maintainer guide
+│   └── clickhouse/                  # ClickHouse skills
+│       └── best-practices/          # Reference skill: MooseStack + ClickHouse optimization
+│           ├── SKILL.md             # Skill definition (overview)
+│           ├── AGENTS.md            # Full compiled guide (generated)
+│           ├── metadata.json        # Version, organization, abstract
+│           ├── README.md            # Maintainer guide
+│           └── rules/               # Individual rule files with TS/PY examples
+│               ├── _sections.md     # Section metadata
+│               ├── _template.md     # Template for new rules
+│               └── *.md             # Rule files (e.g., query-join-filter-before.md)
 ├── packages/
 │   └── clickhouse-best-practices-build/  # Build tooling
 │       ├── package.json             # Bun scripts
@@ -39,22 +56,46 @@ agent-skills/
         └── clickhouse-best-practices-ci.yml  # CI workflow
 ```
 
+### Namespace Convention
+
+Skills are grouped under namespace directories:
+- `skills/514/` — Skills for the 514 platform (CLI, workflows, deployment tools)
+- `skills/clickhouse/` — Skills for ClickHouse database optimization
+
 ## Creating a New Skill
 
-### Directory Structure
+### Reference Skills (rule-based)
+
+Directory structure for skills with individual rules and a build pipeline:
 
 ```
 skills/
-  {skill-name}/           # kebab-case directory name
-    SKILL.md              # Required: skill definition
-    AGENTS.md             # Generated: full compiled guide
-    metadata.json         # Required: version, organization, abstract
-    README.md             # Required: maintainer guide
-    rules/                # Required: rule files
-      _sections.md        # Section metadata
-      _template.md        # Template for new rules
-      *.md                # Individual rules
+  {namespace}/              # Namespace directory (e.g., 514, clickhouse)
+    {skill-name}/           # kebab-case directory name
+      SKILL.md              # Required: skill definition
+      AGENTS.md             # Generated: full compiled guide
+      metadata.json         # Required: version, organization, abstract
+      README.md             # Required: maintainer guide
+      rules/                # Required: rule files
+        _sections.md        # Section metadata
+        _template.md        # Template for new rules
+        *.md                # Individual rules
 ```
+
+### Workflow Skills (single-file)
+
+Not all skills need rules and a build system. A **workflow skill** is a single `SKILL.md` that drives an agent through a multi-stage process. The frontmatter uses `allowed-tools` and `argument-hint` instead of `metadata`:
+
+```
+skills/
+  {namespace}/              # Namespace directory (e.g., 514, clickhouse)
+    {skill-name}/           # kebab-case directory name
+      SKILL.md              # Complete workflow definition
+      metadata.json         # Version, organization, abstract
+      README.md             # Maintainer guide
+```
+
+Workflow skills have no `rules/` directory, no build step, and no generated `AGENTS.md`. Edit `SKILL.md` directly. See `skills/514/perf-optimize/` for an example.
 
 ### Naming Conventions
 
@@ -138,11 +179,13 @@ Skills are loaded on-demand — only the skill name and description are loaded a
 
 ### Build System Requirements
 
-Each skill should have a build package that:
+Reference skills should have a build package that:
 - Validates rule structure and content
 - Validates code examples (e.g., SQL syntax for database skills)
 - Checks internal links
 - Generates the compiled `AGENTS.md` file
+
+Workflow skills do not require a build system.
 
 For ClickHouse Best Practices, the build system:
 - Uses Bun for fast execution
