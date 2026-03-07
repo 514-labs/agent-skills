@@ -4,11 +4,11 @@ on:
   push:
     branches: [main]
     paths:
-      - 'skills/clickhouse-best-practices/**'
+      - 'skills/clickhouse/best-practices/**'
       - 'packages/clickhouse-best-practices-build/**'
   pull_request:
     paths:
-      - 'skills/clickhouse-best-practices/**'
+      - 'skills/clickhouse/best-practices/**'
       - 'packages/clickhouse-best-practices-build/**'
 
 jobs:
@@ -43,7 +43,7 @@ jobs:
         uses: actions/upload-artifact@5d5d22a31266ced268874388b861e4b58bb5c2f3 # v4.3.1
         with:
           name: agents-md
-          path: skills/clickhouse-best-practices/AGENTS.md
+          path: skills/clickhouse/best-practices/AGENTS.md
 
       - name: Send Slack notification
         if: github.ref == 'refs/heads/main' && success()

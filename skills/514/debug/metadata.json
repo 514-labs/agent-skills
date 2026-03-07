@@ -1,0 +1,9 @@
+{
+  "version": "0.1.0",
+  "organization": "514 Labs",
+  "date": "March 2026",
+  "abstract": "Guided workflow for debugging 514 deployment issues — checking deployment status, tailing logs, inspecting metrics, examining resources, and running diagnostic queries.",
+  "references": [
+    "https://docs.fiveonefour.com"
+  ]
+}

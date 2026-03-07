@@ -43,11 +43,14 @@ Goal: Authenticate, identify the target project, and find the active deployment.
 
 3. List deployments for the selected project:
    ```
-   514 agent deployment list --project <PROJECT_SLUG> --json
+   514 agent deployment list --project <PROJECT> --json
    ```
-   Identify the **active production deployment** (highest priority: status "active" or "running").
+   `<PROJECT>` is `<ORG/PROJECT>` format (e.g., `acme/analytics`).
 
-4. Summarize what was found (user, org, project, deployment ID) and confirm before proceeding.
+   Identify the **active production deployment** (highest priority: status "active" or "running").
+   Capture both the **deployment ID** (for resource listing commands) and the **branch name** (for metrics/clickhouse/logs commands).
+
+4. Summarize what was found (user, org, project, deployment ID, branch) and confirm before proceeding.
 
 ---
 
@@ -57,32 +60,32 @@ Goal: Collect schema and query data, then produce an optimization plan.
 
 1. Fetch the current schema:
    ```
-   514 agent table list <DEPLOY_ID> --project <PROJECT_SLUG> --json
-   514 agent materialized-view list <DEPLOY_ID> --project <PROJECT_SLUG> --json
-   514 agent sql-resource list <DEPLOY_ID> --project <PROJECT_SLUG> --json
+   514 agent table list <DEPLOY_ID> --project <PROJECT> --json
+   514 agent materialized-view list <DEPLOY_ID> --project <PROJECT> --json
+   514 agent sql-resource list <DEPLOY_ID> --project <PROJECT> --json
    ```
 
 2. Collect baseline runtime metrics. Run each query and save the results in conversation context for comparison in Stage 4:
 
    **Slow queries** — top 10 by duration:
    ```
-   514 metrics query <DEPLOY_ID> --project <PROJECT_SLUG> --sql 'SELECT query, type, event_time, query_duration_ms, read_rows, read_bytes, result_rows, result_bytes, memory_usage FROM system.query_log WHERE type = '\''QueryFinish'\'' AND query_duration_ms > 100 ORDER BY query_duration_ms DESC LIMIT 10' --json
+   514 agent metrics query --project <PROJECT> --branch <BRANCH> --duration-min 100 --sort-by query_duration_ms --sort-dir desc --limit 10 --json
    ```
 
    **Part sizes** — storage footprint per table and partition:
    ```
-   514 metrics query <DEPLOY_ID> --project <PROJECT_SLUG> --sql 'SELECT database, table, partition, sum(rows) AS total_rows, formatReadableSize(sum(bytes_on_disk)) AS disk_size, count() AS part_count FROM system.parts WHERE active = 1 AND database NOT IN ('\''system'\'', '\''INFORMATION_SCHEMA'\'', '\''information_schema'\'') GROUP BY database, table, partition ORDER BY sum(bytes_on_disk) DESC LIMIT 20' --json
+   514 clickhouse query 'SELECT database, table, partition, sum(rows) AS total_rows, formatReadableSize(sum(bytes_on_disk)) AS disk_size, count() AS part_count FROM system.parts WHERE active = 1 AND database NOT IN ('\''system'\'', '\''INFORMATION_SCHEMA'\'', '\''information_schema'\'') GROUP BY database, table, partition ORDER BY sum(bytes_on_disk) DESC LIMIT 20' --project <PROJECT> --branch <BRANCH> --json
    ```
 
    **Column cardinality** — candidates for `LowCardinality`:
    ```
-   514 metrics query <DEPLOY_ID> --project <PROJECT_SLUG> --sql 'SELECT database, table, name AS column, type, uniqExact(toString(column)) AS distinct_values FROM system.columns WHERE database NOT IN ('\''system'\'', '\''INFORMATION_SCHEMA'\'', '\''information_schema'\'') AND type = '\''String'\'' GROUP BY database, table, name, type HAVING distinct_values < 10000 ORDER BY distinct_values ASC LIMIT 20' --json
+   514 clickhouse query 'SELECT database, table, name AS column, type FROM system.columns WHERE database NOT IN ('\''system'\'', '\''INFORMATION_SCHEMA'\'', '\''information_schema'\'') AND type LIKE '\''%String%'\'' ORDER BY database, table, name' --project <PROJECT> --branch <BRANCH> --json
    ```
 
    These metrics feed directly into the analysis below.
 
 3. Analyze the schema, metrics, and queries against the **clickhouse-best-practices** skill.
-   Read the rules in `skills/clickhouse-best-practices/rules/` (or `AGENTS.md` for the compiled guide)
+   Read the rules in `skills/clickhouse/best-practices/rules/` (or `AGENTS.md` for the compiled guide)
    and evaluate each applicable rule against the collected schema and metrics data.
    Pay particular attention to rules tagged with schema design and query optimization.
 
@@ -119,9 +122,9 @@ Goal: Apply the approved code changes and push a branch for preview deployment.
 
 5. Wait for the preview deployment to appear:
    ```
-   514 agent deployment list --project <PROJECT_SLUG> --json
+   514 agent deployment list --project <PROJECT> --json
    ```
-   Poll a few times if needed. Identify the new preview deployment ID.
+   Poll a few times if needed. Identify the new preview deployment ID and its branch name (`<PREVIEW_BRANCH>`).
 
 ---
 
@@ -131,24 +134,24 @@ Goal: Compare before/after metrics on the preview deployment.
 
 1. Fetch the preview schema:
    ```
-   514 agent table list <PREVIEW_DEPLOY_ID> --project <PROJECT_SLUG> --json
+   514 agent table list <PREVIEW_DEPLOY_ID> --project <PROJECT> --json
    ```
 
 2. Re-run the same metrics queries from Stage 2 against the preview deployment:
 
    **Slow queries:**
    ```
-   514 metrics query <PREVIEW_DEPLOY_ID> --project <PROJECT_SLUG> --sql 'SELECT query, type, event_time, query_duration_ms, read_rows, read_bytes, result_rows, result_bytes, memory_usage FROM system.query_log WHERE type = '\''QueryFinish'\'' AND query_duration_ms > 100 ORDER BY query_duration_ms DESC LIMIT 10' --json
+   514 agent metrics query --project <PROJECT> --branch <PREVIEW_BRANCH> --duration-min 100 --sort-by query_duration_ms --sort-dir desc --limit 10 --json
    ```
 
    **Part sizes:**
    ```
-   514 metrics query <PREVIEW_DEPLOY_ID> --project <PROJECT_SLUG> --sql 'SELECT database, table, partition, sum(rows) AS total_rows, formatReadableSize(sum(bytes_on_disk)) AS disk_size, count() AS part_count FROM system.parts WHERE active = 1 AND database NOT IN ('\''system'\'', '\''INFORMATION_SCHEMA'\'', '\''information_schema'\'') GROUP BY database, table, partition ORDER BY sum(bytes_on_disk) DESC LIMIT 20' --json
+   514 clickhouse query 'SELECT database, table, partition, sum(rows) AS total_rows, formatReadableSize(sum(bytes_on_disk)) AS disk_size, count() AS part_count FROM system.parts WHERE active = 1 AND database NOT IN ('\''system'\'', '\''INFORMATION_SCHEMA'\'', '\''information_schema'\'') GROUP BY database, table, partition ORDER BY sum(bytes_on_disk) DESC LIMIT 20' --project <PROJECT> --branch <PREVIEW_BRANCH> --json
    ```
 
    **Column cardinality:**
    ```
-   514 metrics query <PREVIEW_DEPLOY_ID> --project <PROJECT_SLUG> --sql 'SELECT database, table, name AS column, type, uniqExact(toString(column)) AS distinct_values FROM system.columns WHERE database NOT IN ('\''system'\'', '\''INFORMATION_SCHEMA'\'', '\''information_schema'\'') AND type = '\''String'\'' GROUP BY database, table, name, type HAVING distinct_values < 10000 ORDER BY distinct_values ASC LIMIT 20' --json
+   514 clickhouse query 'SELECT database, table, name AS column, type FROM system.columns WHERE database NOT IN ('\''system'\'', '\''INFORMATION_SCHEMA'\'', '\''information_schema'\'') AND type LIKE '\''%String%'\'' ORDER BY database, table, name' --project <PROJECT> --branch <PREVIEW_BRANCH> --json
    ```
 
 3. Compare the preview results against the Stage 2 baseline. Build a comparison summary covering:

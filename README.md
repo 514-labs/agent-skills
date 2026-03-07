@@ -14,8 +14,10 @@ Works with Claude Code, Cursor, Copilot, Windsurf, Gemini CLI, Codex, and [20+ o
 
 | Skill | Type | Description |
 |-------|------|-------------|
-| [`clickhouse-best-practices`](./skills/clickhouse-best-practices/) | Reference (28 rules) | Schema design, query optimization, and data ingestion best practices — ClickHouse SQL + MooseStack TypeScript & Python |
-| [`perf-optimize`](./skills/perf-optimize/) | Workflow (5 stages) | Guided performance optimization: profile a deployment, identify bottlenecks, apply fixes, verify on preview, ship a PR |
+| [`clickhouse-best-practices`](./skills/clickhouse/best-practices/) | Reference (28 rules) | Schema design, query optimization, and data ingestion best practices — ClickHouse SQL + MooseStack TypeScript & Python |
+| [`514-cli`](./skills/514/cli/) | Workflow | 514 CLI basics — logging in, linking a project, checking deployments, browsing docs |
+| [`514-debug`](./skills/514/debug/) | Workflow | Deployment debugging — status checks, log tailing, slow query discovery, resource inspection, diagnostic SQL |
+| [`perf-optimize`](./skills/514/perf-optimize/) | Workflow (5 stages) | Guided performance optimization: profile a deployment, identify bottlenecks, apply fixes, verify on preview, ship a PR |
 
 ---
 
@@ -49,7 +51,7 @@ Teams use MooseStack + ClickHouse to ship analytics features inside their applic
 | OPTIMIZE avoidance | 1 | HIGH | let merges happen naturally |
 | JSON usage | 1 | MEDIUM | use JSON type for dynamic schemas |
 
-Browse the rules: [`skills/clickhouse-best-practices/`](./skills/clickhouse-best-practices/) | Human-friendly overview: [SKILL.md](./skills/clickhouse-best-practices/SKILL.md)
+Browse the rules: [`skills/clickhouse/best-practices/`](./skills/clickhouse/best-practices/) | Human-friendly overview: [SKILL.md](./skills/clickhouse/best-practices/SKILL.md)
 
 ### Example prompts
 
@@ -62,6 +64,45 @@ Browse the rules: [`skills/clickhouse-best-practices/`](./skills/clickhouse-best
 You don't strictly need to name the skill — most agents will activate it automatically when they see ClickHouse or MooseStack context. We like to call it explicitly when we want a formal review against the full ruleset.
 
 For best results, have `moose dev` running and connect the [MooseStack MCP server](https://docs.fiveonefour.com/moosestack/moosedev-mcp) to your agent. This lets the agent query your local ClickHouse, inspect infrastructure, and validate its recommendations against real data.
+
+---
+
+## 514-cli
+
+The foundational **workflow skill** for the 514 platform. Teaches agents how to authenticate, discover projects, inspect deployed schemas, and run metrics queries — the building blocks that other 514 workflow skills (like `perf-optimize`) rely on.
+
+### Sections
+
+| Section | What it covers |
+|---------|----------------|
+| **Authentication** | Login, whoami, org switching |
+| **Projects** | List, link, setup |
+| **Deployments** | List and filter deployments |
+| **Docs** | Search and browse 514 docs from the terminal |
+
+### Prerequisites
+
+- **514 CLI** — installed and on your PATH
+
+---
+
+## 514-debug
+
+A **workflow skill** for diagnosing deployment issues. When something is broken or behaving unexpectedly, this skill walks agents through the 514 CLI's observability commands to figure out what's going on.
+
+### Sections
+
+| Section | What it covers |
+|---------|----------------|
+| **Deployment status** | Health checks, status filters, branch targeting |
+| **Logs** | Error filtering, full-text search, time ranges, live tailing |
+| **Query metrics** | Slow queries, memory-heavy queries, duration/rows filters |
+| **Resource inspection** | Tables, views, streams, functions, endpoints, syncs |
+| **Diagnostic queries** | Ad-hoc ClickHouse SQL — table sizes, running queries, recent errors |
+
+### Prerequisites
+
+- **514 CLI** — installed and on your PATH
 
 ---
 
