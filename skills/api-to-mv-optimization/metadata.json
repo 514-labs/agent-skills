@@ -1,0 +1,13 @@
+{
+  "version": "0.1.0",
+  "organization": "514 Labs",
+  "date": "February 2026",
+  "clickhouseVersion": "24.1+",
+  "mooseStackVersion": "1.0+",
+  "abstract": "Guided workflow for converting ClickHouse API queries into pre-aggregated MaterializedView architectures using MooseStack. Covers input validation, access-pattern analysis, strategy selection (fan-in / fan-out / cascade), serving-table design, MV planning, and API migration. Each step includes TypeScript and Python MooseStack examples derived from a production telemetry dashboard.",
+  "references": [
+    "https://docs.fiveonefour.com/moosestack",
+    "https://clickhouse.com/docs/best-practices/use-materialized-views",
+    "https://github.com/ClickHouse/ClickHouse"
+  ]
+}
