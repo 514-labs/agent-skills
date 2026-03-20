@@ -161,43 +161,78 @@ Let the user accept, modify, or reject items.
 
 ## Stage 3 — OPTIMIZE
 
-Goal: Apply approved code changes, push a branch for preview deployment, and ensure preview tables have data.
+Goal: Create a preview branch seeded from main, apply approved code changes locally, validate DDL against local ClickHouse, push the updated branch, and ensure preview tables have data.
 
-### 3a. Create branch and apply changes
+### 3a. Create branch and seed the preview deployment from main
 
 1. Create a feature branch:
    ```bash
    git checkout -b perf/optimize-clickhouse
    ```
 
-2. Apply the approved optimizations by editing the Moose data model files, SQL resources, or materialized view definitions. Use Edit for each change.
+2. Push the unchanged branch immediately to trigger the initial preview deployment:
+   ```bash
+   git push -u origin perf/optimize-clickhouse
+   ```
 
-3. After all changes, stage and commit:
+3. Wait for the preview deployment to appear:
+   ```
+   514 agent deployment list --project <PROJECT> --json
+   ```
+   Poll a few times if needed. Identify the preview branch name (`<PREVIEW_BRANCH>`) and the latest preview deployment ID. This first push seeds the preview database from main before any risky DDL changes are introduced.
+
+### 3b. Apply approved changes and validate them locally
+
+1. Apply the approved optimizations by editing the Moose data model files, SQL resources, or materialized view definitions. Use Edit for each change.
+
+2. Before committing or pushing the changed code, run Moose locally from the Moose app directory:
+   ```bash
+   moose dev --timestamps
+   ```
+   Keep this process running while you validate the local infrastructure.
+
+3. Wait for the initial `moose dev` startup sequence to complete successfully. Treat the validation as failed if any compile, schema sync, ClickHouse, or DDL errors appear in the output. `moose check` and `moose build` are not sufficient here because they do not prove that local ClickHouse accepted the DDL.
+
+4. Verify that the changed infrastructure objects exist locally:
+   ```bash
+   moose ls --type tables --json
+   moose ls --type sql_resource --json
+   ```
+
+5. For each table whose DDL changed, confirm that local ClickHouse accepted the definition:
+   ```bash
+   moose query "SHOW CREATE TABLE <CHANGED_TABLE>"
+   ```
+   If any `SHOW CREATE TABLE` command fails, or the returned DDL does not match the intended change, stop and fix the local schema before continuing.
+
+6. Stop `moose dev` after the local validation passes.
+
+7. After the local DDL validation passes, stage and commit:
    ```bash
    git add -A
    git commit -m "perf: optimize ClickHouse schema based on profiling analysis"
    ```
 
-4. Push the branch to trigger a preview deployment:
+8. Push the updated branch code:
    ```bash
-   git push -u origin perf/optimize-clickhouse
+   git push
    ```
 
-5. Wait for the preview deployment to appear:
+9. Wait for the latest preview deployment for `<PREVIEW_BRANCH>` to appear:
    ```
    514 agent deployment list --project <PROJECT> --json
    ```
-   Poll a few times if needed. Identify the new preview deployment ID and its branch name (`<PREVIEW_BRANCH>`).
+   Poll a few times if needed. Identify the latest preview deployment ID for the branch before continuing.
 
-### 3b. Verify which tables have data (raw — prompt user)
+### 3c. Verify which tables have data (raw — prompt user)
 
-After the preview deployment completes Phase 2 (branch code deployed, migrations run), check row counts. **Prompt the user** with the diagnostic SQL before running:
+After the updated preview deployment completes Phase 2 (branch code deployed, migrations run), check row counts. **Prompt the user** with the diagnostic SQL before running:
 
 ```
 514 clickhouse query 'SELECT table, sum(rows) AS total_rows FROM system.parts WHERE active = 1 AND database NOT IN ('\''system'\'','\''INFORMATION_SCHEMA'\'','\''information_schema'\'') GROUP BY table' --project <PROJECT> --branch <PREVIEW_BRANCH> --json
 ```
 
-### 3c. Re-seed tables that lost data (raw — prompt user)
+### 3d. Re-seed tables that lost data (raw — prompt user)
 
 For tables identified in Stage 2h as needing re-seed (ORDER BY or engine changes that cause table recreation):
 
@@ -211,7 +246,7 @@ This works because preview and production share the same ClickHouse cluster — 
 
 If column types changed between branches, compare `system.columns` between the production and preview databases and construct an explicit column list with CAST expressions. **Show the user the cast mapping** before executing.
 
-### 3d. Wait for background merges
+### 3e. Wait for background merges
 
 After re-seeding, poll part counts to confirm data has settled before benchmarking:
 ```

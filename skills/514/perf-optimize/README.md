@@ -12,7 +12,7 @@ The agent runs through five stages:
 |-------|------|
 | **SETUP** | Authenticate with 514 CLI, identify the target project and active deployment |
 | **PROFILE** | Fetch schema and query data, analyze against an optimization checklist, produce a plan |
-| **OPTIMIZE** | Apply approved changes, push a branch to trigger a preview deployment |
+| **OPTIMIZE** | Create a preview branch from main, validate changes locally with `moose dev`, then push the updated branch |
 | **VERIFY** | Compare before/after metrics on the preview deployment |
 | **SHIP** | Create a PR with performance evidence |
 
