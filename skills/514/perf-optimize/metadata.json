@@ -4,7 +4,7 @@
   "date": "March 2026",
   "clickhouseVersion": "24.1+",
   "mooseStackVersion": "1.0+",
-  "abstract": "Guided workflow that profiles a 514/Moose deployment, identifies ClickHouse performance bottlenecks, applies optimizations, verifies improvements on a preview deployment, and ships a PR.",
+  "abstract": "Guided workflow that profiles a 514/Moose deployment, identifies ClickHouse performance bottlenecks, applies optimizations, verifies improvements across paired preview deployments with matched seed data, and ships a PR.",
   "references": [
     "https://docs.fiveonefour.com/moosestack",
     "https://clickhouse.com/docs"

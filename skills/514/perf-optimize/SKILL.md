@@ -13,7 +13,7 @@ description: >
   Guided ClickHouse performance optimization workflow.
   Profiles a 514/Moose deployment, identifies slow queries,
   applies optimizations, verifies improvements via active benchmarking
-  on a preview deployment, and ships a PR.
+  across paired preview deployments with matched seed data, and ships a PR.
 ---
 
 # ClickHouse Performance Optimization
@@ -112,18 +112,18 @@ Batch these together and **prompt the user once** showing all diagnostic SQL bef
 
 From the `514 agent metrics query` output (step 2b), extract the SQL text of the top 5–10 slow queries. Deduplicate by query template (ignore literal differences). Store as `BENCHMARK_QUERIES`.
 
-For each benchmark query, note which tables it reads from. This determines which tables need data on the preview branch later.
+For each benchmark query, note which tables it reads from. This determines which tables must remain sample-size matched across the baseline and experiment preview branches later.
 
-### 2e. Capture baseline EXPLAIN plans (raw — prompt user)
+### 2e. Capture production EXPLAIN plans for context (raw — prompt user)
 
 **Prompt the user once** showing all EXPLAIN queries before executing:
 ```
 514 clickhouse query 'EXPLAIN indexes = 1 <QUERY_SQL>' --project <PROJECT> --branch <BRANCH> --json
 ```
 
-Run one per benchmark query. Store results as `BASELINE_EXPLAINS`.
+Run one per benchmark query. Store results as `PRODUCTION_EXPLAINS`. These are for production context only; the final validation comparison happens between the baseline and experiment preview branches in Stage 4.
 
-### 2f. Run baseline benchmarks (raw — prompt user)
+### 2f. Capture production benchmark metrics for context (raw — prompt user)
 
 **Prompt the user** showing the benchmark query set and explain that each will be run 3× on production (1 warmup + 2 timed) via `514 clickhouse query`.
 
@@ -136,7 +136,7 @@ Then collect results via the guardrailed metrics command:
 514 agent metrics query --project <PROJECT> --branch <BRANCH> --search "<query_pattern>" --sort-by query_duration_ms --sort-dir desc --limit 10 --json
 ```
 
-Store as `BASELINE_METRICS`.
+Store as `PRODUCTION_METRICS`. These are useful for prioritization, but the final benchmark comparison happens between the baseline and experiment preview branches in Stage 4.
 
 ### 2g. Analyze against best practices
 
@@ -161,96 +161,111 @@ Let the user accept, modify, or reject items.
 
 ## Stage 3 — OPTIMIZE
 
-Goal: Create a preview branch seeded from main, apply approved code changes locally, validate DDL against local ClickHouse, push the updated branch, and ensure preview tables have data.
+Goal: Create matched baseline and experiment preview branches from the same starting point, apply approved code changes only to the experiment branch, validate DDL locally, and ensure both preview databases retain equivalent sample sizes for Stage 4.
 
-### 3a. Create branch and seed the preview deployment from main
+### 3a. Create paired preview branches from the same starting point
 
-1. Create a feature branch:
+1. Record the unchanged starting commit so both preview branches fork from the same point:
    ```bash
-   git checkout -b perf/optimize-clickhouse
+   BASE_COMMIT=$(git rev-parse HEAD)
    ```
 
-2. Push the unchanged branch immediately to trigger the initial preview deployment:
+2. Create the baseline preview branch and push it unchanged:
    ```bash
-   git push -u origin perf/optimize-clickhouse
+   git checkout -b perf/optimize-clickhouse-baseline
+   git push -u origin perf/optimize-clickhouse-baseline
    ```
 
-3. Wait for the preview deployment to appear:
+3. Return to the same starting commit, create the experiment branch, and push it unchanged:
+   ```bash
+   git checkout "$BASE_COMMIT"
+   git checkout -b perf/optimize-clickhouse-experiment
+   git push -u origin perf/optimize-clickhouse-experiment
+   ```
+
+4. Wait for both preview deployments to appear:
    ```
    514 agent deployment list --project <PROJECT> --json
    ```
-   Poll a few times if needed. Identify the preview branch name (`<PREVIEW_BRANCH>`) and the latest preview deployment ID. This first push seeds the preview database from main before any risky DDL changes are introduced.
+   Poll a few times if needed. Identify the baseline preview branch and deployment (`<BASELINE_PREVIEW_BRANCH>`, `<BASELINE_PREVIEW_DEPLOY_ID>`) and the experiment preview branch and deployment (`<EXPERIMENT_PREVIEW_BRANCH>`, `<EXPERIMENT_PREVIEW_DEPLOY_ID>`). Do not apply any code changes to the baseline branch after this point; it is the control preview.
 
-### 3b. Apply approved changes and validate them locally
+### 3b. Apply approved changes only on the experiment branch and validate them locally
 
-1. Apply the approved optimizations by editing the Moose data model files, SQL resources, or materialized view definitions. Use Edit for each change.
+1. Make sure you are on the experiment branch locally:
+   ```bash
+   git checkout perf/optimize-clickhouse-experiment
+   ```
 
-2. Before committing or pushing the changed code, run Moose locally from the Moose app directory:
+2. Apply the approved optimizations by editing the Moose data model files, SQL resources, or materialized view definitions. Use Edit for each change.
+
+3. Before committing or pushing the changed code, run Moose locally from the Moose app directory:
    ```bash
    moose dev --timestamps
    ```
    Keep this process running while you validate the local infrastructure.
 
-3. Wait for the initial `moose dev` startup sequence to complete successfully. Treat the validation as failed if any compile, schema sync, ClickHouse, or DDL errors appear in the output. `moose check` and `moose build` are not sufficient here because they do not prove that local ClickHouse accepted the DDL.
+4. Wait for the initial `moose dev` startup sequence to complete successfully. Treat the validation as failed if any compile, schema sync, ClickHouse, or DDL errors appear in the output. `moose check` and `moose build` are not sufficient here because they do not prove that local ClickHouse accepted the DDL.
 
-4. Verify that the changed infrastructure objects exist locally:
+5. Verify that the changed infrastructure objects exist locally:
    ```bash
    moose ls --type tables --json
    moose ls --type sql_resource --json
    ```
 
-5. For each table whose DDL changed, confirm that local ClickHouse accepted the definition:
+6. For each table whose DDL changed, confirm that local ClickHouse accepted the definition:
    ```bash
    moose query "SHOW CREATE TABLE <CHANGED_TABLE>"
    ```
    If any `SHOW CREATE TABLE` command fails, or the returned DDL does not match the intended change, stop and fix the local schema before continuing.
 
-6. Stop `moose dev` after the local validation passes.
+7. Stop `moose dev` after the local validation passes.
 
-7. After the local DDL validation passes, stage and commit:
+8. After the local DDL validation passes, stage and commit the experiment branch:
    ```bash
    git add -A
    git commit -m "perf: optimize ClickHouse schema based on profiling analysis"
    ```
 
-8. Push the updated branch code:
+9. Push the updated experiment branch code:
    ```bash
    git push
    ```
 
-9. Wait for the latest preview deployment for `<PREVIEW_BRANCH>` to appear:
+10. Wait for the latest preview deployment for `<EXPERIMENT_PREVIEW_BRANCH>` to appear:
    ```
    514 agent deployment list --project <PROJECT> --json
    ```
-   Poll a few times if needed. Identify the latest preview deployment ID for the branch before continuing.
+   Poll a few times if needed. Identify the latest experiment preview deployment ID for the branch before continuing.
 
-### 3c. Verify which tables have data (raw — prompt user)
+### 3c. Verify that both preview branches still have comparable data (raw — prompt user)
 
-After the updated preview deployment completes Phase 2 (branch code deployed, migrations run), check row counts. **Prompt the user** with the diagnostic SQL before running:
-
-```
-514 clickhouse query 'SELECT table, sum(rows) AS total_rows FROM system.parts WHERE active = 1 AND database NOT IN ('\''system'\'','\''INFORMATION_SCHEMA'\'','\''information_schema'\'') GROUP BY table' --project <PROJECT> --branch <PREVIEW_BRANCH> --json
-```
-
-### 3d. Re-seed tables that lost data (raw — prompt user)
-
-For tables identified in Stage 2h as needing re-seed (ORDER BY or engine changes that cause table recreation):
-
-**Prompt the user showing each INSERT statement and explain why re-seeding is needed** — the table was recreated due to an ORDER BY change, so Phase 1 seeded data was lost. This is the highest-risk raw query in the workflow; be explicit about what will happen.
+After the updated experiment preview deployment completes Phase 2 (branch code deployed, migrations run), check row counts on both branches. **Prompt the user** with both diagnostic SQL statements before running:
 
 ```
-514 clickhouse query 'INSERT INTO <PREVIEW_DB>.<TABLE> SELECT * FROM <PROD_DB>.<TABLE> LIMIT 10000' --project <PROJECT> --branch <PREVIEW_BRANCH> --json
+514 clickhouse query 'SELECT table, sum(rows) AS total_rows FROM system.parts WHERE active = 1 AND database NOT IN ('\''system'\'','\''INFORMATION_SCHEMA'\'','\''information_schema'\'') GROUP BY table' --project <PROJECT> --branch <BASELINE_PREVIEW_BRANCH> --json
+514 clickhouse query 'SELECT table, sum(rows) AS total_rows FROM system.parts WHERE active = 1 AND database NOT IN ('\''system'\'','\''INFORMATION_SCHEMA'\'','\''information_schema'\'') GROUP BY table' --project <PROJECT> --branch <EXPERIMENT_PREVIEW_BRANCH> --json
 ```
 
-This works because preview and production share the same ClickHouse cluster — Phase 1 seeding uses the same cross-database pattern.
+### 3d. Re-seed experiment tables from the baseline preview when needed (raw — prompt user)
 
-If column types changed between branches, compare `system.columns` between the production and preview databases and construct an explicit column list with CAST expressions. **Show the user the cast mapping** before executing.
+For tables identified in Stage 2h as needing re-seed (ORDER BY or engine changes that cause table recreation), keep the baseline preview unchanged and copy the seed data from the baseline preview database into the experiment preview database.
+
+**Prompt the user showing each INSERT statement and explain why re-seeding is needed** — the table was recreated on the experiment branch, so the experiment preview lost data and must be re-aligned with the unchanged baseline preview. This is the highest-risk raw query in the workflow; be explicit about what will happen.
+
+```
+514 clickhouse query 'INSERT INTO <EXPERIMENT_DB>.<TABLE> SELECT * FROM <BASELINE_DB>.<TABLE> LIMIT 10000' --project <PROJECT> --branch <EXPERIMENT_PREVIEW_BRANCH> --json
+```
+
+This works because the paired preview databases share the same ClickHouse cluster, allowing cross-database copy from the baseline preview into the experiment preview.
+
+If column types changed between branches, compare `system.columns` between the baseline and experiment databases and construct an explicit column list with CAST expressions. **Show the user the cast mapping** before executing.
 
 ### 3e. Wait for background merges
 
-After re-seeding, poll part counts to confirm data has settled before benchmarking:
+After re-seeding, poll part counts on both preview branches to confirm data has settled before benchmarking:
 ```
-514 clickhouse query 'SELECT table, count() AS parts FROM system.parts WHERE active = 1 AND database NOT IN ('\''system'\'','\''INFORMATION_SCHEMA'\'','\''information_schema'\'') GROUP BY table ORDER BY parts DESC' --project <PROJECT> --branch <PREVIEW_BRANCH> --json
+514 clickhouse query 'SELECT table, count() AS parts FROM system.parts WHERE active = 1 AND database NOT IN ('\''system'\'','\''INFORMATION_SCHEMA'\'','\''information_schema'\'') GROUP BY table ORDER BY parts DESC' --project <PROJECT> --branch <BASELINE_PREVIEW_BRANCH> --json
+514 clickhouse query 'SELECT table, count() AS parts FROM system.parts WHERE active = 1 AND database NOT IN ('\''system'\'','\''INFORMATION_SCHEMA'\'','\''information_schema'\'') GROUP BY table ORDER BY parts DESC' --project <PROJECT> --branch <EXPERIMENT_PREVIEW_BRANCH> --json
 ```
 
 **Prompt the user** before running. If part counts are high, wait briefly and re-check.
@@ -259,16 +274,17 @@ After re-seeding, poll part counts to confirm data has settled before benchmarki
 
 ## Stage 4 — VERIFY
 
-Goal: Compare before/after via schema diffs, EXPLAIN plans, storage metrics, and active benchmarking on the preview deployment.
+Goal: Compare the baseline and experiment preview branches via schema diffs, EXPLAIN plans, storage metrics, and active benchmarking on matched preview datasets.
 
 ### 4a. Schema comparison
 
-Capture CREATE TABLE DDL on the preview branch (**prompt user** before each `514 clickhouse query`):
+Capture CREATE TABLE DDL on both preview branches (**prompt user** before each `514 clickhouse query`):
 ```
-514 clickhouse query 'SHOW CREATE TABLE <PREVIEW_DB>.<TABLE>' --project <PROJECT> --branch <PREVIEW_BRANCH> --json
+514 clickhouse query 'SHOW CREATE TABLE <BASELINE_DB>.<TABLE>' --project <PROJECT> --branch <BASELINE_PREVIEW_BRANCH> --json
+514 clickhouse query 'SHOW CREATE TABLE <EXPERIMENT_DB>.<TABLE>' --project <PROJECT> --branch <EXPERIMENT_PREVIEW_BRANCH> --json
 ```
 
-Compare against `BASELINE_DDL` from Stage 1. Document:
+Compare the experiment DDL against the baseline preview DDL. Use `BASELINE_DDL` from Stage 1 only as a sanity check if the baseline preview unexpectedly differs from production main. Document:
 - ORDER BY key changes
 - Column type changes (e.g., String → LowCardinality)
 - New or removed indexes
@@ -277,44 +293,47 @@ Compare against `BASELINE_DDL` from Stage 1. Document:
 
 ### 4b. Storage comparison (raw — prompt user)
 
-Run `system.parts` query on preview, **prompt user** first:
+Run the same `system.parts` query on both preview branches, **prompt user** first:
 ```
-514 clickhouse query 'SELECT database, table, sum(rows) AS total_rows, formatReadableSize(sum(bytes_on_disk)) AS disk_size, sum(bytes_on_disk) / greatest(sum(rows), 1) AS bytes_per_row, count() AS part_count FROM system.parts WHERE active = 1 AND database NOT IN ('\''system'\'','\''INFORMATION_SCHEMA'\'','\''information_schema'\'') GROUP BY database, table ORDER BY sum(bytes_on_disk) DESC' --project <PROJECT> --branch <PREVIEW_BRANCH> --json
+514 clickhouse query 'SELECT database, table, sum(rows) AS total_rows, formatReadableSize(sum(bytes_on_disk)) AS disk_size, sum(bytes_on_disk) / greatest(sum(rows), 1) AS bytes_per_row, count() AS part_count FROM system.parts WHERE active = 1 AND database NOT IN ('\''system'\'','\''INFORMATION_SCHEMA'\'','\''information_schema'\'') GROUP BY database, table ORDER BY sum(bytes_on_disk) DESC' --project <PROJECT> --branch <BASELINE_PREVIEW_BRANCH> --json
+514 clickhouse query 'SELECT database, table, sum(rows) AS total_rows, formatReadableSize(sum(bytes_on_disk)) AS disk_size, sum(bytes_on_disk) / greatest(sum(rows), 1) AS bytes_per_row, count() AS part_count FROM system.parts WHERE active = 1 AND database NOT IN ('\''system'\'','\''INFORMATION_SCHEMA'\'','\''information_schema'\'') GROUP BY database, table ORDER BY sum(bytes_on_disk) DESC' --project <PROJECT> --branch <EXPERIMENT_PREVIEW_BRANCH> --json
 ```
 
-Normalize to bytes-per-row since preview has ~10K rows vs production volume.
+Because both previews were seeded from the same starting point, direct branch-to-branch comparisons are meaningful. Use bytes-per-row and part counts to explain any remaining differences.
 
 ### 4c. EXPLAIN comparison (primary structural evidence)
 
-**Prompt user** before running EXPLAIN queries on preview. For each benchmark query:
+**Prompt user** before running EXPLAIN queries on both preview branches. For each benchmark query:
 ```
-514 clickhouse query 'EXPLAIN indexes = 1 <QUERY_SQL>' --project <PROJECT> --branch <PREVIEW_BRANCH> --json
+514 clickhouse query 'EXPLAIN indexes = 1 <QUERY_SQL>' --project <PROJECT> --branch <BASELINE_PREVIEW_BRANCH> --json
+514 clickhouse query 'EXPLAIN indexes = 1 <QUERY_SQL>' --project <PROJECT> --branch <EXPERIMENT_PREVIEW_BRANCH> --json
 ```
 
-Compare against `BASELINE_EXPLAINS`. Look for:
+Compare the experiment preview against the baseline preview. Look for:
 - **Primary index usage**: Key Condition where there was none before
 - **Granule reduction**: fewer `selected_granules` / `total_granules`
 - **Skipping index hits**: new index conditions active
 
-EXPLAIN diffs are the most reliable structural signal because they are independent of data volume.
+EXPLAIN diffs are the most reliable structural signal because both branches are running against matched preview seeds.
 
 ### 4d. Active benchmark via replay + metrics
 
 This is the core verification step. **Prompt the user once** showing the full benchmark plan (queries to replay, number of runs) before executing.
 
-1. **Warm caches** — run each benchmark query once on preview via `514 clickhouse query` (discard results)
-2. **Timed runs** — run each benchmark query 2–3× via `514 clickhouse query`
-3. **Collect via guardrailed metrics**:
+1. **Warm caches on both branches** — run each benchmark query once on the baseline preview and once on the experiment preview via `514 clickhouse query` (discard results)
+2. **Timed runs on both branches** — run each benchmark query 2–3× on each branch via `514 clickhouse query`, alternating branch order to reduce cache drift
+3. **Collect via guardrailed metrics for both branches**:
    ```
-   514 agent metrics query --project <PROJECT> --branch <PREVIEW_BRANCH> --search "<query_pattern>" --sort-by query_duration_ms --sort-dir desc --limit 10 --json
+   514 agent metrics query --project <PROJECT> --branch <BASELINE_PREVIEW_BRANCH> --search "<query_pattern>" --sort-by query_duration_ms --sort-dir desc --limit 10 --json
+   514 agent metrics query --project <PROJECT> --branch <EXPERIMENT_PREVIEW_BRANCH> --search "<query_pattern>" --sort-by query_duration_ms --sort-dir desc --limit 10 --json
    ```
-4. **Compare against `BASELINE_METRICS`** from Stage 2f
+4. **Compare baseline preview metrics against experiment preview metrics**
 
 ### 4e. Comparison report
 
 Build a per-query before/after comparison table covering:
 
-| Metric | Baseline (prod) | Preview | Change |
+| Metric | Baseline Preview | Experiment Preview | Change |
 |--------|-----------------|---------|--------|
 | EXPLAIN: index condition | (none) | Key Condition: ... | ✓ new |
 | EXPLAIN: selected granules | N | M | −X% |
@@ -322,7 +341,7 @@ Build a per-query before/after comparison table covering:
 | Memory usage | C | D | −Z% |
 | Rows read | E | F | −W% |
 
-Include a caveat: preview has ~10K rows — EXPLAIN and granule metrics are the reliable structural signals. Duration improvements at small scale strongly suggest improvements at production scale, but exact speedup ratios will differ.
+Include a caveat: both preview branches were seeded from the same starting point, so branch-to-branch duration and rows-read comparisons are sample-size matched. The previews still represent preview-scale data rather than full production volume, so absolute timing will differ from production even when the relative branch comparison is valid.
 
 ### 4f. Regression check
 
@@ -342,8 +361,8 @@ Goal: Create a pull request with comprehensive performance evidence.
    - EXPLAIN diffs per benchmark query (before/after)
    - Metrics comparison table from Stage 4e
    - Before/after schema comparison
-   - Note about preview data volume (~10K rows) and how to interpret results
-   - Tables that were manually re-seeded and why
+   - Note that the baseline and experiment previews were seeded from the same starting point, and how to interpret preview-scale results
+   - Tables that were manually re-seeded from the baseline preview and why
    - Any caveats or follow-up items
    - Recommendations for monitoring post-merge (which queries to watch, expected improvements)
 
