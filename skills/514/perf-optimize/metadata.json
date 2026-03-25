@@ -1,10 +1,10 @@
 {
-  "version": "0.2.0",
+  "version": "0.4.0",
   "organization": "514 Labs",
   "date": "March 2026",
   "clickhouseVersion": "24.1+",
   "mooseStackVersion": "1.0+",
-  "abstract": "Guided workflow that profiles a 514/Moose deployment, identifies ClickHouse performance bottlenecks, applies optimizations, verifies improvements across paired preview deployments with matched seed data, and ships a PR.",
+  "abstract": "Guided workflow that profiles a 514/Moose deployment, identifies ClickHouse performance bottlenecks, maps hot query patterns back to code, proposes candidate optimizations, and hands the next step to perf-benchmark or production-rollout-plan.",
   "references": [
     "https://docs.fiveonefour.com/moosestack",
     "https://clickhouse.com/docs"
