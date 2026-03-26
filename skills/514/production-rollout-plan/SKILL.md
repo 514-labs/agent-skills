@@ -25,7 +25,7 @@ If the user provided a project slug as an argument, use it to skip the project s
 
 Commands fall into three categories:
 
-**Guardrailed read-only:** `514 agent auth whoami`, `514 agent project list`, `514 agent deployment list`, `514 agent table list`, `514 agent materialized-view list`, `514 agent sql-resource list`, `514 deployment list`, `514 env list`, `514 env get`, `git branch --show-current`, `git status --short`, `git diff --name-only`, `moose ls`, `moose generate migration`
+**Guardrailed read-only:** `514 agent auth whoami`, `514 agent project list`, `514 agent deployment list`, `514 agent table list`, `514 agent materialized-view list`, `514 agent sql-resource list`, `514 deployment list`, `514 env list`, `514 env get`, `git branch --show-current`, `git status --short`, `git diff --name-only`, `gh pr view`, `moose ls`, `moose generate migration`
 
 **Local generation:** `moose generate hash-token`
 
@@ -61,14 +61,26 @@ Goal: Identify the project, exact target deployment, local change context, and r
    git diff --name-only
    ```
 
-4. Resolve the exact target deployment before touching auth or migration generation:
+4. Resolve the target branch before looking up deployments.
+
+   First, check whether the current branch has an open pull request:
+
+   ```bash
+   gh pr view --json baseRefName --jq '.baseRefName' 2>/dev/null
+   ```
+
+   - If a PR exists, use its base branch as the target (e.g., `perf/baseline`, `main`).
+   - If no PR exists, fall back to `main`.
+   - Use AskUserQuestion to confirm the resolved target branch with the user before proceeding.
+
+5. Resolve the exact target deployment before touching auth or migration generation:
 
    ```bash
    514 deployment list --project <PROJECT> --json
    ```
 
    Choose the target deployment with these rules:
-   - choose the latest deployment where `branch = "main"` and `status = "Deployed"`
+   - choose the latest deployment where `branch = <TARGET_BRANCH>` and `status = "Deployed"`
    - if none qualify, or "latest" cannot be determined unambiguously from the returned deployment data, stop and carry a blocker instead of guessing
 
    Capture:
@@ -76,7 +88,7 @@ Goal: Identify the project, exact target deployment, local change context, and r
    - `TARGET_DEPLOY_BRANCH`
    - `TARGET_DEPLOY_URL`
 
-5. Resolve how `moose generate migration` will authenticate to the remote Moose Admin API for the chosen target deployment.
+6. Resolve how `moose generate migration` will authenticate to the remote Moose Admin API for the chosen target deployment.
 
    Check whether the remote Moose Admin API is already configured on `TARGET_DEPLOY_BRANCH`:
 
@@ -153,17 +165,47 @@ Goal: Generate the migration plan against the target deployment, review the gene
 
 ### Analyze operations
 
-Operation type reference:
+Operation type reference (see `.moose/migration_schema.json` for full schema):
 
 | Category | Operation | Effect |
 |----------|-----------|--------|
 | Additive | `CreateTable` | New table with columns, order_by, engine |
 | Additive | `AddTableColumn` | New column on existing table |
 | Additive | `RenameTableColumn` | Column rename, data preserved |
+| Additive | `AddTableIndex` | New data-skipping index on existing table |
+| Additive | `AddTableProjection` | New projection for alternative data ordering |
+| Additive | `CreateMaterializedView` | New MV with SELECT and target table |
+| Additive | `CreateView` | New user-defined SELECT view |
 | Destructive | `DropTable` | Permanently removes table and all data |
 | Destructive | `DropTableColumn` | Removes column from table |
-| Destructive | `ModifyTableColumn` | Changes column type/properties (before/after state) |
-| Custom | `RawSql` | Arbitrary SQL with description |
+| Destructive | `DropTableIndex` | Removes data-skipping index |
+| Destructive | `DropTableProjection` | Removes projection from table |
+| Destructive | `DropMaterializedView` | Removes materialized view |
+| Destructive | `DropView` | Removes user-defined view |
+| Destructive | `ModifyTableColumn` | Changes column type/properties (see safe-widening rules below) |
+| Metadata | `ModifyTableSettings` | Changes table-level settings (e.g., index_granularity) |
+| Metadata | `ModifySampleBy` | Changes SAMPLE BY expression |
+| Metadata | `RemoveSampleBy` | Removes SAMPLE BY from table |
+| Metadata | `ModifyTableTtl` | Changes or removes table-level TTL |
+| Custom | `RawSql` | Arbitrary SQL array with description |
+
+`ModifyTableColumn` safe-widening rules:
+
+Not all `ModifyTableColumn` operations are destructive. Classify each by comparing `before_column` and `after_column`:
+
+| Change | Classification | Reason |
+|--------|---------------|--------|
+| `String` → `LowCardinality(String)` | Safe | Dictionary encoding wrapper, no data loss |
+| `IntN` → wider `IntM` (e.g., `Int32` → `Int64`) | Safe | Wider numeric range, existing values preserved |
+| `T` → `Nullable(T)` | Safe | Adds NULL support, existing non-NULL values preserved |
+| `FloatN` → wider `FloatM` (e.g., `Float32` → `Float64`) | Safe | Greater precision, existing values preserved |
+| Adding or changing `annotations` only (same base type) | Safe | Metadata-only change |
+| `LowCardinality(String)` → `String` | Safe | Removes dictionary encoding, data preserved |
+| Narrowing numeric (e.g., `Int64` → `Int32`) | Destructive | Values outside target range are truncated |
+| `Nullable(T)` → `T` | Destructive | NULL values become default, potential data loss |
+| Type family change (e.g., `String` → `Int64`) | Destructive | Incompatible conversion, potential data loss |
+
+When classifying the overall plan, safe-widening `ModifyTableColumn` operations count as **additive**, not destructive.
 
 3. Read `migrations/plan.yaml` and scan each operation in a single pass. For each operation:
 
@@ -172,9 +214,37 @@ Operation type reference:
    **Classify:** Tag each operation as additive, destructive, or custom. The overall plan is additive if all operations are additive, destructive if any are destructive, mixed if both.
 
    **Detect patterns:**
-   - `DropTable` + `CreateTable` for the same table name = versioned-table upgrade. Flag for backfill.
-   - `ModifyTableColumn` with a narrowing type change = potential data loss. Flag for backfill.
-   - `RawSql` with backfill intent = confirm the SQL is safe and the description is clear.
+
+   - **`DropTable` + `CreateTable` for the same table name** = versioned-table upgrade. The generated plan is unsafe as-is because the Drop destroys data before the Create can receive a backfill. Rewrite the plan to the rename-backfill-drop pattern:
+
+     1. Replace the `DropTable` with a `RawSql` that renames the old table:
+        ```yaml
+        - RawSql:
+            description: Rename old <TABLE> to preserve data for backfill
+            sql:
+            - "RENAME TABLE <TABLE> TO <TABLE>_old"
+        ```
+     2. Keep the `CreateTable` as generated (it creates the new schema under the original name).
+     3. Insert a `RawSql` backfill that copies data from the renamed old table to the new table. For each column, compare the old schema (from `remote_state.json`) against the new `CreateTable` DDL:
+        - If type or annotations changed (e.g., `String` → `LowCardinality(String)`), wrap in `CAST(col, 'NewClickHouseType')`.
+        - If unchanged, pass through by column name.
+        Present the generated INSERT to the user for approval.
+        ```yaml
+        - RawSql:
+            description: Backfill new <TABLE> from renamed old table
+            sql:
+            - "INSERT INTO <TABLE> SELECT <col_list_with_casts> FROM <TABLE>_old"
+        ```
+     4. Insert a `RawSql` that drops the renamed old table after backfill:
+        ```yaml
+        - RawSql:
+            description: Drop old renamed <TABLE> after backfill
+            sql:
+            - "DROP TABLE IF EXISTS <TABLE>_old"
+        ```
+
+   - **`ModifyTableColumn` with a narrowing type change** = potential data loss. Flag for backfill.
+   - **`RawSql` with backfill intent** = confirm the SQL is safe and the description is clear.
 
    **Check ordering:**
    - `CreateTable` (new version) must precede any `RawSql` backfill that populates it
@@ -185,6 +255,16 @@ Operation type reference:
    **Check dependencies:** For any destructive operation (`DropTable`, `DropTableColumn`, `ModifyTableColumn`), use AskUserQuestion to ask whether the user knows of applications, materialized views, or downstream consumers that depend on the affected table or column. Carry dependencies forward as blockers.
 
    If the plan needs edits (reordering, injecting a `RawSql` backfill, replacing a drop+add with `RenameTableColumn`), recommend the specific edit and confirm with the user before modifying `plan.yaml`.
+
+   **`RawSql` schema contract:** When injecting `RawSql` operations, the `sql` field must be an **array of strings**, not a single string. This is defined in `.moose/migration_schema.json`. The `RawSql` operation has exactly two required fields: `sql` (array) and `description` (string). Do not add `cluster_name`, `database`, or other fields that belong to other operation types.
+
+   **Post-edit validation:** After any manual edits to `plan.yaml`, read `.moose/migration_schema.json` and verify the edited plan conforms. Check that:
+   - Every `RawSql.sql` is an array of strings
+   - Every operation matches one of the `oneOf` variants in the schema
+   - All required fields are present for each operation type
+   - No extra fields are added that the schema does not define for that operation
+
+   If validation fails, fix the plan before proceeding.
 
 4. Verify `migrations/remote_state.json` was captured against the correct target deployment. If it does not match the target from Stage 1, stop and carry a blocker.
 
