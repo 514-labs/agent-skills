@@ -44,7 +44,7 @@ In practice the skill should:
 - stop and raise a blocker if the required admin API token or direct ClickHouse credentials still cannot be resolved securely
 
 Use it:
-- after `perf-benchmark` has selected a winning candidate
+- after `perf-optimize` has selected a winning candidate and opened the performance PR
 - after `perf-optimize` when the user wants to ship a single chosen change without benchmarking
 - whenever a developer already has a chosen change and needs a safe path to production
 

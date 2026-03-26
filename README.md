@@ -17,14 +17,13 @@ Works with Claude Code, Cursor, Copilot, Windsurf, Gemini CLI, Codex, and [20+ o
 | [`clickhouse-best-practices`](./skills/clickhouse/best-practices/) | Reference (28 rules) | Schema design, query optimization, and data ingestion best practices — ClickHouse SQL + MooseStack TypeScript & Python |
 | [`514-cli`](./skills/514/cli/) | Workflow | 514 CLI basics — logging in, linking a project, checking deployments, browsing docs |
 | [`514-debug`](./skills/514/debug/) | Workflow | Deployment debugging — status checks, log tailing, slow query discovery, resource inspection, diagnostic SQL |
-| [`perf-optimize`](./skills/514/perf-optimize/) | Workflow (4 stages) | Guided optimization discovery: profile production, propose candidate schema changes, and hand the next step to perf-benchmark or production-rollout-plan |
-| [`perf-benchmark`](./skills/514/perf-benchmark/) | Workflow (6 stages) | Controlled branch benchmarking: scaffold a baseline and candidate harness, benchmark each branch, rank the results, and hand the winner to production-rollout-plan |
+| [`perf-optimize`](./skills/514/perf-optimize/) | Workflow (7 stages) | End-to-end optimization and benchmarking: profile production, propose candidates, benchmark a frozen baseline vs experiment branches, compare results, and ship the winning PR |
 | [`production-rollout-plan`](./skills/514/production-rollout-plan/) | Workflow (5 stages) | Production rollout planning: classify a chosen change, define rollout/validation/rollback steps, and review a safe path to production |
 
 ### Workflow Map
 
-- `perf-optimize` -> `perf-benchmark` -> `production-rollout-plan`
-- `perf-optimize` -> `production-rollout-plan` for direct single-change paths
+- `perf-optimize` -> `production-rollout-plan`
+- `production-rollout-plan` can also be used directly once a specific change has been chosen
 
 ---
 
@@ -76,7 +75,7 @@ For best results, have `moose dev` running and connect the [MooseStack MCP serve
 
 ## 514-cli
 
-The foundational **workflow skill** for the 514 platform. Teaches agents how to authenticate, discover projects, inspect deployed schemas, and run metrics queries — the building blocks that other 514 workflow skills (like `perf-optimize`, `perf-benchmark`, and `production-rollout-plan`) rely on.
+The foundational **workflow skill** for the 514 platform. Teaches agents how to authenticate, discover projects, inspect deployed schemas, and run metrics queries — the building blocks that other 514 workflow skills (like `perf-optimize` and `production-rollout-plan`) rely on.
 
 ### Sections
 
@@ -115,16 +114,19 @@ A **workflow skill** for diagnosing deployment issues. When something is broken 
 
 ## perf-optimize
 
-A **workflow skill** that guides an agent through profiling and planning ClickHouse optimizations in a 514/Moose deployment. It owns production discovery, candidate generation, and benchmark target identification. It stops before production rollout planning.
+A **workflow skill** that guides an agent through profiling, benchmarking, and selecting ClickHouse optimizations in a 514/Moose deployment. It owns production discovery, candidate generation, frozen baseline setup, experiment branch benchmarking, comparison, and PR creation. Production rollout planning remains separate.
 
 ### Stages
 
 | Stage | Goal |
 |-------|------|
-| **SETUP** | Authenticate with 514 CLI, identify the target project and active deployment |
-| **PROFILE** | Fetch production schema and query data, and analyze it against an optimization checklist |
-| **PLAN** | Propose candidate optimizations with expected impact and benchmark context |
-| **NEXT STEP** | Either validate one direct branch-local change for `production-rollout-plan` or hand off candidates to `perf-benchmark` |
+| **SETUP** | Authenticate with 514 CLI, identify the target project and active deployment, and capture baseline DDL |
+| **PROFILE** | Fetch production schema and query data, analyze it, and map hot query patterns back to code |
+| **PROPOSE** | Present candidate optimizations and get approval on which experiments to run |
+| **BASELINE** | Scaffold the benchmark harness, create the frozen control branch, and benchmark the baseline deployment |
+| **EXPERIMENT** | Run approved optimizations on experiment branches and benchmark each candidate |
+| **COMPARE** | Rank baseline vs candidate results and pick a winner |
+| **SHIP** | Open the winning PR with benchmark evidence and hand off to `production-rollout-plan` for production rollout planning |
 
 ### Usage
 
@@ -137,40 +139,9 @@ If a project slug is provided, the agent skips the project selection prompt. Oth
 ### Prerequisites
 
 - **514 CLI** — authenticated (`514 auth login`)
-- **moose** — available locally for branch-local DDL validation
-- A 514/Moose project with at least one active deployment
-
-**Docs:** [MooseStack](https://docs.fiveonefour.com/moosestack) | [ClickHouse](https://clickhouse.com/docs)
-
----
-
-## perf-benchmark
-
-A **workflow skill** for controlled branch benchmarking of ClickHouse optimizations in a 514/Moose deployment. It assumes candidate strategies are already chosen and owns the branch topology, benchmark scaffold, report generation, and candidate ranking. It stops at winner selection and handoff.
-
-### Stages
-
-| Stage | Goal |
-|-------|------|
-| **SETUP** | Scaffold the benchmark harness and create a frozen baseline branch |
-| **BASELINE** | Run the benchmark suite against the baseline deployment |
-| **CANDIDATES** | Create one branch per approved optimization strategy |
-| **BENCHMARK** | Run the same benchmark suite against each candidate deployment |
-| **COMPARE** | Rank candidates using report artifacts and parity checks |
-| **HANDOFF** | Select the winner and hand it to `production-rollout-plan` |
-
-### Usage
-
-```
-/perf-benchmark [project-slug]
-```
-
-### Prerequisites
-
-- **514 CLI** — authenticated (`514 auth login`)
-- **moose** — available locally, including `moose add benchmark`
+- **moose** — available locally, including `moose add benchmark` and `moose dev`
 - **pnpm** — available for the benchmark suite
-- A 514/Moose project with at least one active production deployment
+- A 514/Moose project with at least one active deployment
 
 **Docs:** [MooseStack](https://docs.fiveonefour.com/moosestack) | [ClickHouse](https://clickhouse.com/docs)
 

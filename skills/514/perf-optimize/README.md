@@ -1,24 +1,28 @@
 # perf-optimize
 
-A **workflow skill** for discovering and planning ClickHouse optimizations in a 514/Moose deployment.
+A **workflow skill** for profiling, benchmarking, and selecting ClickHouse optimizations in a 514/Moose deployment.
 
 Unlike rule-based skills, this skill is a single `SKILL.md` with no rules directory or build system. Edit `SKILL.md` directly.
 
 ## What it does
 
-The agent runs through four stages:
+The agent runs through seven stages:
 
 | Stage | Goal |
 |-------|------|
-| **SETUP** | Authenticate, identify the target project, and capture production schema context |
-| **PROFILE** | Collect query, schema, and storage evidence from production |
-| **PLAN** | Propose candidate optimizations and identify the benchmark target interface |
-| **NEXT STEP** | Either validate one direct branch-local change for `production-rollout-plan` or hand off candidates to `perf-benchmark` |
+| **SETUP** | Authenticate, identify the target project, find the active deployment, and capture baseline DDL |
+| **PROFILE** | Collect production query, schema, and storage evidence, then map hot query patterns back to code |
+| **PROPOSE** | Present candidate optimizations, benchmark targets, and experiment risk to the user |
+| **BASELINE** | Scaffold the benchmark harness, create the frozen control branch, ensure comparable seed data, and benchmark baseline |
+| **EXPERIMENT** | Create experiment branches, apply approved optimizations, validate locally, seed, and benchmark each candidate |
+| **COMPARE** | Rank baseline vs candidate benchmark results and select a winner |
+| **SHIP** | Create the winning PR with benchmark evidence and route production rollout planning to `production-rollout-plan` |
 
 ## Prerequisites
 
 - **514 CLI** — authenticated (`514 auth login`)
-- **moose** — available locally for branch-local DDL validation
+- **moose** — available locally, including `moose add benchmark` and `moose dev`
+- **pnpm** — available for the benchmark suite
 - A 514/Moose project with at least one active production deployment
 
 ## Usage
@@ -31,11 +35,10 @@ If a project slug is provided, the agent skips the project selection prompt. Oth
 
 ## Relationship to downstream skills
 
-`perf-optimize` is the discovery skill. It profiles production, proposes candidate schema changes, and produces the discovery handoff.
+`perf-optimize` is the end-to-end optimization workflow in this repo. It profiles production, proposes candidate schema changes, benchmarks a frozen baseline against experiment branches, and opens the winning PR.
 
 Use:
-- `perf-benchmark` when the user wants controlled multi-branch benchmarking and ranking
-- `production-rollout-plan` when the user has chosen a specific change and needs a safe path to production
+- `production-rollout-plan` when the winning candidate, or any other chosen change, needs a safe path to production
 
 ## Editing
 
