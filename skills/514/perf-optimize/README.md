@@ -21,6 +21,8 @@ The agent runs through seven stages:
 ## Prerequisites
 
 - **514 CLI** — authenticated (`514 auth login`)
+- **git** — available locally for baseline/candidate branch creation
+- **gh CLI** — available locally for creating the winning pull request
 - **moose** — available locally, including `moose add benchmark` and `moose dev`
 - **pnpm** — available for the benchmark suite
 - A 514/Moose project with at least one active production deployment
