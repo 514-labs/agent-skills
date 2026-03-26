@@ -1,0 +1,12 @@
+{
+  "version": "0.1.2",
+  "organization": "514 Labs",
+  "date": "March 2026",
+  "clickhouseVersion": "24.1+",
+  "mooseStackVersion": "1.0+",
+  "abstract": "Guided workflow for chosen schema, model, or query changes targeting a 514-hosted Moose deployment. It resolves the exact target deployment and remote Moose Admin API auth mode, always generates the Moose migration plan first with the required authentication flags, treats Admin API bootstrap as an explicit approved remediation path, and then produces a reviewed production rollout plan covering rollout sequence, validation, rollback, backfill, cutover, and blockers.",
+  "references": [
+    "https://docs.fiveonefour.com/moosestack",
+    "https://clickhouse.com/docs"
+  ]
+}
