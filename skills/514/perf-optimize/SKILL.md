@@ -53,6 +53,22 @@ Across baseline and all candidate branches:
 - the SQL shape and call pattern stay the same apart from the intended optimization
 - only the `table` reference changes per candidate branch
 
+## Sample sizing
+
+When seeding preview branches from production, compute a representative sample size per table using this tiering table:
+
+| Prod row count | Sample size | Rationale |
+| -------------- | ----------- | --------- |
+| < 100K | All rows (no LIMIT) | Already small; copy everything |
+| 100K – 1M | 100,000 | ~12 granules; enough for index/granule-skip differences |
+| 1M – 100M | 1% of rows | Multiple partitions, realistic merge behavior |
+| 100M – 1B | 0.1% of rows (min 1M) | Caps transfer while exercising all features |
+| > 1B | 0.01% of rows (min 1M, max 10M) | Hard cap prevents preview storage blow-up |
+
+The 100K floor ensures enough granules (ClickHouse default = 8,192 rows) for EXPLAIN to show meaningful skipping differences. The 10M ceiling keeps transfer time under a few minutes and preview storage under ~5 GB per table.
+
+Always present the computed sample sizes to the user for approval before seeding. Store final sizes as `SAMPLE_SIZES` for reuse across branches.
+
 ---
 
 ## Stage 1 — SETUP
@@ -275,10 +291,28 @@ Check row counts on the baseline deployment. **Prompt the user** before running:
 514 clickhouse query 'SELECT table, sum(rows) AS total_rows FROM system.parts WHERE active = 1 AND database NOT IN ('\''system'\'','\''INFORMATION_SCHEMA'\'','\''information_schema'\'') GROUP BY table' --project <PROJECT> --branch perf/baseline --json
 ```
 
-If tables that the benchmark queries read from have insufficient data, re-seed from production. **Prompt the user** showing each INSERT statement:
+If tables that the benchmark queries read from have insufficient data, compute sample sizes and re-seed from production.
+
+**Compute sample sizes.** Query production row counts for each table the benchmark reads from:
 
 ```
-514 clickhouse query 'INSERT INTO <BASELINE_DB>.<TABLE> SELECT * FROM <PROD_DB>.<TABLE> LIMIT 10000' --project <PROJECT> --branch perf/baseline --json
+514 clickhouse query 'SELECT table, sum(rows) AS total_rows FROM system.parts WHERE active = 1 AND database = '\''<PROD_DB>'\'' GROUP BY table ORDER BY total_rows DESC' --project <PROJECT> --branch <PROD_BRANCH> --json
+```
+
+Apply the tiering table from the **Sample sizing** section to compute a LIMIT per table.
+
+**Present the seeding plan.** Use AskUserQuestion to show the user a summary table before executing:
+
+| Table | Prod rows | Sample size | Effective % | LIMIT clause |
+| ----- | --------- | ----------- | ----------- | ------------ |
+| ... | ... | ... | ... | ... |
+
+Let the user adjust any value. Store the final sizes as `SAMPLE_SIZES`.
+
+**Execute the seed.** For each table, run the INSERT (with no LIMIT for tables under 100K). **Prompt the user** showing each INSERT statement:
+
+```
+514 clickhouse query 'INSERT INTO <BASELINE_DB>.<TABLE> SELECT * FROM <PROD_DB>.<TABLE> LIMIT <SAMPLE_SIZE>' --project <PROJECT> --branch perf/baseline --json
 ```
 
 Preview and production share the same ClickHouse cluster — this cross-database pattern is the standard seeding mechanism.
@@ -355,7 +389,7 @@ Each sub-agent runs the following steps in its worktree:
 
 7. Wait for the candidate deployment and resolve the candidate DB name.
 
-8. Check row counts and re-seed if needed, using the same approach as Stage 4e. For tables that lost data due to destructive changes, re-seed from production.
+8. Check row counts and re-seed if needed. Reuse the `SAMPLE_SIZES` from Stage 4e to ensure baseline and candidates have comparable data volumes. For tables that lost data due to destructive changes, re-seed from production using the same LIMIT values. Re-query production row counts only if the candidate introduced new tables not present in the baseline.
 
    If column types changed between baseline and candidate, compare `system.columns` between the two databases and construct an explicit column list with CAST expressions. **Show the user the cast mapping** before executing.
 
@@ -422,7 +456,7 @@ Goal: Create a pull request for the winning candidate and route to rollout plann
    - benchmark comparison table from Stage 6
    - EXPLAIN diffs (baseline vs winner)
    - re-seed notes (which tables were re-seeded and why)
-   - caveats about preview data volume (~10K rows) and how to interpret results
+   - actual sample sizes per table from `SAMPLE_SIZES` (rows seeded, effective % of production), with a caveat that while samples are sized to exercise ClickHouse storage characteristics (granule skipping, partition pruning, merge behavior), full-volume production behavior may still differ
    - recommendations for monitoring post-merge
 
 3. Create the PR:
