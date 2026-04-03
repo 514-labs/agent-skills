@@ -378,9 +378,9 @@ Each sub-agent runs the following steps in its worktree:
 
 2. Apply exactly one optimization strategy by editing the Moose data model files, SQL resources, or materialized view definitions.
 
-3. If the change is destructive (ORDER BY / engine change), rely on Moose versioned-table behavior.
+3. If the change is destructive (ORDER BY / engine change), create a new data model that produces a separate table with the optimized schema (e.g., `<Model>Optimized` → `<table>_optimized`). Keep the original model and table untouched — `moose dev` and the preview deployment will create the new table automatically.
 
-4. Update the benchmark target interface so only the minimal target change is introduced — usually the `table` reference that points at the versioned or optimized table.
+4. Update the benchmark target interface so only the minimal target change is introduced — usually the `table` reference that points at the new optimized table (e.g., `<table>_optimized`).
 
 5. Validate locally:
 
