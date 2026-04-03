@@ -176,6 +176,14 @@ Store as `BASELINE_METRICS`.
 
 Read the rules in `skills/clickhouse/best-practices/rules/` (or `AGENTS.md` for the compiled guide) and evaluate each applicable rule against the collected schema and metrics data. Pay particular attention to rules tagged with schema design and query optimization.
 
+Additionally, explicitly check each slow query for materialized view opportunities:
+
+- **Aggregation pattern:** Does the query contain `GROUP BY` over a table with high `read_rows` (millions+)? If the aggregation uses functions that support `-State`/`-Merge` (`count`, `uniq`, `sum`, `avg`, `min`, `max`, `quantile`), flag as an incremental MV candidate.
+- **Join pattern:** Does the query join multiple tables where dimension tables change infrequently? If staleness of a few minutes is acceptable, flag as a refreshable MV candidate.
+- **Frequency:** Is the same query template executed many times per hour? High frequency amplifies the benefit of pre-computation.
+
+Consult the `query-mv-when-to-add` rule for the full decision matrix. If a query matches an MV pattern, carry it forward as a candidate alongside schema and index candidates.
+
 ### 2h. Map findings back to code
 
 Read the local Moose codebase to connect profiling evidence to the actual source files. This step covers two things:
@@ -195,6 +203,7 @@ For each likely improvement, capture:
 - query patterns helped and their query entrypoint paths
 - likely schema or model change
 - whether the change is destructive (ORDER BY / engine change = table recreated, seeded data lost)
+- whether the improvement requires creating a new MV + target table (new files, not modifications to existing code; note backfill as a post-deployment action)
 - the benchmark target interface to use (see benchmark contract above)
 
 ---
