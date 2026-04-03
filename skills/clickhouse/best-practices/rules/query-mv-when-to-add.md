@@ -21,13 +21,14 @@ The incremental and refreshable MV rules explain how to build materialized views
 
 | Signal | Recommended MV Type | Alternative to Consider First |
 |--------|---------------------|-------------------------------|
-| `GROUP BY` over large table, real-time data needed | Incremental MV with `AggregatingMergeTree` | Improve ORDER BY key order, add skipping index |
-| Complex multi-table JOIN, staleness acceptable | Refreshable MV on a schedule | Dictionary for small dimensions, denormalized schema |
+| `GROUP BY` over single large table, real-time data needed | Incremental MV with `AggregatingMergeTree` | Improve ORDER BY key order, add skipping index |
+| Complex multi-table JOIN (incompatible with incremental), staleness acceptable | Refreshable MV on a schedule | Dictionary for small dimensions, denormalized schema |
 | Simple filter/sort slow due to full scan | Not an MV case | Fix ORDER BY, add skipping index |
 
 **Trade-offs to weigh before proposing:**
 
-- **Insert overhead:** Incremental MVs add processing at insert time — measure insert throughput if the table has high write volume
+- **Insert overhead:** Incremental MVs process each insert block, but in most cases this has no appreciable impact on overall cluster performance — they scale to petabytes because they only ever compute over incoming data, not the full dataset
+- **Scope limitation:** Incremental MVs work for aggregations over a single source table. Multi-table joins are incompatible with the incremental approach and require a refreshable MV instead
 - **Staleness:** Refreshable MVs serve data up to one refresh interval old — confirm the use case tolerates this
 - **Storage cost:** The target table duplicates data in aggregated or denormalized form
 - **Backfill:** Incremental MVs only process rows inserted after creation — historical data requires a manual `INSERT INTO ... SELECT` backfill
