@@ -1,22 +1,20 @@
 ---
-
-## name: 514-perf-optimize
-
+name: 514-perf-optimize
 argument-hint: "[project-slug]"
 allowed-tools:
-
-- Bash
-- Read
-- Edit
-- Write
-- Glob
-- Grep
-- AskUserQuestion
+  - Bash
+  - Read
+  - Edit
+  - Write
+  - Glob
+  - Grep
+  - AskUserQuestion
 description: >
-Guided ClickHouse performance optimization workflow.
-Profiles a 514/Moose deployment, identifies slow queries,
-proposes optimization candidates, benchmarks baseline vs candidates
-on preview deployments, and ships the winner as a PR.
+  Guided ClickHouse performance optimization workflow.
+  Profiles a 514/Moose deployment, identifies slow queries,
+  proposes optimization candidates, benchmarks baseline vs candidates
+  on preview deployments, and ships the winner as a PR.
+---
 
 # ClickHouse Performance Optimization
 
@@ -60,6 +58,22 @@ Across baseline and all candidate branches:
 - dimensions, metrics, filters, sortable fields, and defaults stay the same
 - the SQL shape and call pattern stay the same apart from the intended optimization
 - only the `table` reference changes per candidate branch
+
+## Sample sizing
+
+When seeding preview branches from production, compute a representative sample size per table using this tiering table:
+
+| Prod row count | Sample size | Rationale |
+| -------------- | ----------- | --------- |
+| < 100K | All rows (no LIMIT) | Already small; copy everything |
+| 100K - 1M | 100,000 | ~12 granules; enough for index/granule-skip differences |
+| 1M - 100M | 1% of rows | Multiple partitions, realistic merge behavior |
+| 100M - 1B | 0.1% of rows (min 1M) | Caps transfer while exercising all features |
+| > 1B | 0.01% of rows (min 1M, max 10M) | Hard cap prevents preview storage blow-up |
+
+The 100K floor ensures enough granules (ClickHouse default = 8,192 rows) for EXPLAIN to show meaningful skipping differences. The 10M ceiling keeps transfer time under a few minutes and preview storage under ~5 GB per table.
+
+Always present the computed sample sizes to the user for approval before seeding. Store final sizes as `SAMPLE_SIZES` for reuse across branches.
 
 ---
 
@@ -170,6 +184,14 @@ Store as `BASELINE_METRICS`.
 
 Read the rules in `skills/clickhouse/best-practices/rules/` (or `AGENTS.md` for the compiled guide) and evaluate each applicable rule against the collected schema and metrics data. Pay particular attention to rules tagged with schema design and query optimization.
 
+Additionally, explicitly check each slow query for materialized view opportunities:
+
+- **Aggregation pattern:** Does the query contain `GROUP BY` over a table with high `read_rows` (millions+)? If the aggregation uses functions that support `-State`/`-Merge` (`count`, `uniq`, `sum`, `avg`, `min`, `max`, `quantile`), flag as an incremental MV candidate.
+- **Join pattern:** Does the query join multiple tables where dimension tables change infrequently? If staleness of a few minutes is acceptable, flag as a refreshable MV candidate.
+- **Frequency:** Is the same query template executed many times per hour? High frequency amplifies the benefit of pre-computation.
+
+Consult the `query-mv-when-to-add` rule for the full decision matrix. If a query matches an MV pattern, carry it forward as a candidate alongside schema and index candidates.
+
 ### 2h. Map findings back to code
 
 Read the local Moose codebase to connect profiling evidence to the actual source files. This step covers two things:
@@ -189,6 +211,7 @@ For each likely improvement, capture:
 - query patterns helped and their query entrypoint paths
 - likely schema or model change
 - whether the change is destructive (ORDER BY / engine change = table recreated, seeded data lost)
+- whether the improvement requires creating a new MV + target table (new files, not modifications to existing code; note backfill as a post-deployment action)
 - the benchmark target interface to use (see benchmark contract above)
 
 ---
@@ -316,13 +339,17 @@ Check row counts for benchmark-relevant tables on the baseline deployment. **Pro
 
 Store this as `BASELINE_SEED_COUNTS`.
 
-If any benchmark-relevant table has insufficient data to exercise the profiled query shape, re-seed from production using a deterministic slice that you can reuse for every candidate branch.
+If any benchmark-relevant table has insufficient data to exercise the profiled query shape, compute sample sizes and re-seed from production using a deterministic slice that you can reuse for every candidate branch.
+
+Query production row counts for each benchmark-relevant table and apply the tiering table from the **Sample sizing** section to compute `SAMPLE_SIZES`.
 
 Prefer this order when defining the seed slice:
 
 1. reuse an existing filter window from the profiled query pattern
 2. seed a deterministic subset with an explicit `--where` filter
 3. fall back to `LIMIT` only when no better slice is available, and record that caveat in the parity notes later
+
+Use AskUserQuestion to show the user the seeding plan before execution, including table name, production row count, computed sample size, effective percentage, and the final `--limit` value for each table. Let the user adjust any value, then store the final sizes as `SAMPLE_SIZES`.
 
 Store the chosen seed strategy and any caveats as `BASELINE_SEED_NOTES`.
 
@@ -331,7 +358,7 @@ Before re-seeding a table, decide whether append is safe. `514 clickhouse seed` 
 Example seed pattern:
 
 ```
-514 clickhouse seed <TABLE> --project <PROJECT> --branch perf/baseline --from <BRANCH> --where "<DETERMINISTIC_FILTER>" --limit <SEED_LIMIT> --json
+514 clickhouse seed <TABLE> --project <PROJECT> --branch perf/baseline --from <BRANCH> --where "<DETERMINISTIC_FILTER>" --limit <SAMPLE_SIZE> --json
 ```
 
 Preview and production share the same ClickHouse cluster — this cross-database pattern is the standard seeding mechanism.
@@ -345,6 +372,7 @@ Before running the benchmark suite, verify that the baseline branch has all requ
 - `BENCHMARK_TABLES`
 - `BASELINE_DB`
 - `.env.preview`
+- `SAMPLE_SIZES`
 - `BASELINE_SEED_COUNTS`
 - `BASELINE_SEED_NOTES`
 - the exact seed strategy used for each benchmark-relevant table
@@ -366,6 +394,7 @@ Artifacts from this stage:
 - `BASELINE_BRANCH=perf/baseline`
 - `BASELINE_DB`
 - `.env.preview`
+- `SAMPLE_SIZES`
 - `BASELINE_SEED_COUNTS`
 - `BASELINE_SEED_NOTES`
 - baseline benchmark report under `reports/`
@@ -427,7 +456,7 @@ Each sub-agent runs the following steps in its worktree:
   **Prompt the user once** showing the exact row-count SQL and any fully resolved `514 clickhouse seed` command before executing.
    Seed candidate tables from `perf/baseline`, not from production. The candidate branches should copy the benchmark-relevant data set from the frozen baseline branch so every experiment runs against the same rows.
    For each table in `BENCHMARK_TABLES`, use the baseline branch as the source:
-   Use this full-table copy from baseline even when the baseline itself was originally seeded from a filtered production slice. The candidate branch should inherit the exact baseline data set rather than re-evaluating the production seed filter independently.
+   Use this full-table copy from baseline even when the baseline itself was originally seeded from a filtered production slice. The candidate branch should inherit the exact baseline data set rather than re-evaluating the production seed filter independently, so do not recompute `SAMPLE_SIZES` for candidate branches.
    If column types changed between baseline and candidate, stop and carry a blocker. `514 clickhouse seed` copies `SELECT` * between matching tables, so type-changing reseeds need a follow-up workflow or CLI support that can express cast mappings safely.
    If re-running the seed would create duplicate rows that distort the benchmark, stop and carry a blocker instead of issuing a duplicate-producing seed command.
 9. After seeding or re-seeding, capture `CANDIDATE_SEED_COUNTS` for `BENCHMARK_TABLES` and compare them to `BASELINE_SEED_COUNTS`.
@@ -507,6 +536,7 @@ Goal: Create a pull request for the winning candidate and route to rollout plann
   - EXPLAIN diffs (baseline vs winner)
   - parity summary explaining why the comparison was valid
   - re-seed notes (which tables were re-seeded and why)
+  - actual sample sizes per table from `SAMPLE_SIZES` (rows seeded, effective % of production), with a caveat that while the samples are sized to exercise ClickHouse storage characteristics, full-volume production behavior may still differ
   - any missing validation evidence or explicit user-approved gaps
   - caveats about preview data volume (~10K rows) and how to interpret results
   - recommendations for monitoring post-merge
