@@ -8,6 +8,8 @@ Export platform variables into the benchmark scaffold's `.env.preview` from the 
 514 env list --project <PROJECT> -b perf/baseline --platform --dotenv > .env.preview
 ```
 
+Replace `perf/baseline` with the actual baseline branch name if it differs.
+
 ## Preferred contract: URL
 
 Platform vars expose `MOOSE_CLICKHOUSE_CONFIG__URL`. Validate that `.env.preview` contains it.
