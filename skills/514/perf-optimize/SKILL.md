@@ -13,10 +13,10 @@ allowed-tools:
 - Grep
 - AskUserQuestion
 description: >
-  Guided ClickHouse performance optimization workflow.
-  Profiles a 514/Moose deployment, identifies slow queries,
-  proposes optimization candidates, benchmarks baseline vs candidates
-  on preview deployments, and ships the winner as a PR.
+Guided ClickHouse performance optimization workflow.
+Profiles a 514/Moose deployment, identifies slow queries,
+proposes optimization candidates, benchmarks baseline vs candidates
+on preview deployments, and ships the winner as a PR.
 
 # ClickHouse Performance Optimization
 
@@ -31,15 +31,13 @@ Commands fall into four categories:
 
 **Guardrailed (run freely):** `514 agent auth whoami`, `514 agent project list`, `514 agent deployment list`, `514 agent table list`, `514 agent materialized-view list`, `514 agent sql-resource list`, `514 agent metrics query`, `514 logs query`, `moose add benchmark`, `moose dev`, `moose ls`, `pnpm test:perf`
 
-**Platform vars (run freely):** `514 env list --platform --dotenv` with the correct `--project` and `-b, --branch` flags to export branch-scoped runtime credentials into the benchmark scaffold's `.env.preview` file.
+**Sensitive credential export (require user approval):** `514 env list --platform --dotenv` emits platform-managed secrets. Use it only to write `.env.*` directly, not for general inspection.
 
 **Raw ClickHouse (require user approval):** Any `514 clickhouse query` invocation — including `SHOW CREATE TABLE`, `system.parts` queries, `EXPLAIN`, and benchmark query replay.
 
 **ClickHouse seed (require user approval):** Any `514 clickhouse seed` invocation used to copy rows from a source branch into a preview branch.
 
-Before running any `514 clickhouse query` command, use AskUserQuestion to show the user the exact SQL and get explicit approval. If the command depends on resolved database names, table names, or cast mappings, show the fully resolved SQL, not a template.
-
-Before running any `514 clickhouse seed` command, use AskUserQuestion to show the user the exact command and get explicit approval.
+Before running any command in the sensitive credential export, raw ClickHouse, or ClickHouse seed categories, use AskUserQuestion to show the user the exact command or SQL and get explicit approval. If the command depends on resolved database names, table names, or cast mappings, show the fully resolved form, not a template.
 
 If deployment resolution, database resolution, or target-table resolution is ambiguous at any point, stop and carry a blocker instead of guessing.
 
@@ -423,9 +421,7 @@ Each sub-agent runs the following steps in its worktree:
    git push -u origin perf/candidate-<name>
   ```
 7. Wait for the candidate deployment and resolve the candidate DB name.
-
-   Overwrite `MOOSE_CLICKHOUSE_CONFIG__DB_NAME`, but reuse the rest of the env vars that you set previously in `.env.preview`.
-
+  Overwrite `MOOSE_CLICKHOUSE_CONFIG__DB_NAME`, but reuse the rest of the env vars that you set previously in `.env.preview`.
    If the candidate database name cannot be resolved unambiguously, stop and return a blocker instead of guessing.
 8. Check row counts for `BENCHMARK_TABLES` on the candidate deployment using the same query pattern and the same seed strategy captured in Stage 4e.
   **Prompt the user once** showing the exact row-count SQL and any fully resolved `514 clickhouse seed` command before executing.
