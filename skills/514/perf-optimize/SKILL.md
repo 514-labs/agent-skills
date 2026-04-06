@@ -1,20 +1,22 @@
 ---
-name: 514-perf-optimize
+
+## name: 514-perf-optimize
+
 argument-hint: "[project-slug]"
 allowed-tools:
-  - Bash
-  - Read
-  - Edit
-  - Write
-  - Glob
-  - Grep
-  - AskUserQuestion
+
+- Bash
+- Read
+- Edit
+- Write
+- Glob
+- Grep
+- AskUserQuestion
 description: >
   Guided ClickHouse performance optimization workflow.
   Profiles a 514/Moose deployment, identifies slow queries,
   proposes optimization candidates, benchmarks baseline vs candidates
   on preview deployments, and ships the winner as a PR.
----
 
 # ClickHouse Performance Optimization
 
@@ -25,13 +27,21 @@ If the user provided a project slug as an argument, use it to skip the project s
 
 ## Command safety
 
-Commands fall into two categories:
+Commands fall into four categories:
 
 **Guardrailed (run freely):** `514 agent auth whoami`, `514 agent project list`, `514 agent deployment list`, `514 agent table list`, `514 agent materialized-view list`, `514 agent sql-resource list`, `514 agent metrics query`, `514 logs query`, `moose add benchmark`, `moose dev`, `moose ls`, `pnpm test:perf`
 
-**Raw ClickHouse (require user approval):** Any `514 clickhouse query` invocation — including `SHOW CREATE TABLE`, `system.parts` queries, `EXPLAIN`, benchmark query replay, and `INSERT INTO` for re-seeding.
+**Platform vars (run freely):** `514 env list --platform --dotenv` with the correct `--project` and `-b, --branch` flags to export branch-scoped runtime credentials into the benchmark scaffold's `.env.preview` file.
 
-Before running any `514 clickhouse query` command, use AskUserQuestion to show the user the exact SQL and get explicit approval.
+**Raw ClickHouse (require user approval):** Any `514 clickhouse query` invocation — including `SHOW CREATE TABLE`, `system.parts` queries, `EXPLAIN`, and benchmark query replay.
+
+**ClickHouse seed (require user approval):** Any `514 clickhouse seed` invocation used to copy rows from a source branch into a preview branch.
+
+Before running any `514 clickhouse query` command, use AskUserQuestion to show the user the exact SQL and get explicit approval. If the command depends on resolved database names, table names, or cast mappings, show the fully resolved SQL, not a template.
+
+Before running any `514 clickhouse seed` command, use AskUserQuestion to show the user the exact command and get explicit approval.
+
+If deployment resolution, database resolution, or target-table resolution is ambiguous at any point, stop and carry a blocker instead of guessing.
 
 ## Benchmark contract
 
@@ -60,47 +70,33 @@ Across baseline and all candidate branches:
 Goal: Authenticate, identify the target project, find the active deployment, and capture baseline DDL.
 
 1. Verify authentication:
-
-   ```
+  ```
    514 agent auth whoami --json
-   ```
-
+  ```
    If this fails, stop and tell the user to run `514 auth login` first.
-
 2. List available projects:
-
-   ```
+  ```
    514 agent project list --json
-   ```
-
+  ```
    If the user provided a project slug as an argument, match it from the list.
    Otherwise, ask the user which project to optimize using AskUserQuestion.
-
 3. List deployments for the selected project:
-
-   ```
+  ```
    514 agent deployment list --project <PROJECT> --json
-   ```
-
+  ```
    `<PROJECT>` is `<ORG/PROJECT>` format (e.g., `acme/analytics`).
-
    Identify the **active production deployment** (highest priority: status "active" or "running").
    Capture both the **deployment ID** (for resource listing commands) and the **branch name** (for metrics/clickhouse/logs commands).
-
+   If no deployment clearly matches, or multiple deployments appear equally valid, stop and carry a blocker instead of guessing.
 4. List tables to discover the full set:
-
-   ```
+  ```
    514 agent table list <DEPLOY_ID> --project <PROJECT> --json
-   ```
-
+  ```
 5. Capture CREATE TABLE DDL for each table. **Prompt the user first** — show the list of tables and the SHOW CREATE TABLE statements you intend to run, then get approval:
-
-   ```
+  ```
    514 clickhouse query 'SHOW CREATE TABLE <DB>.<TABLE>' --project <PROJECT> --branch <BRANCH> --json
-   ```
-
+  ```
    Store the DDL as `BASELINE_DDL` — this is needed for schema comparison in Stage 6.
-
 6. Summarize what was found (user, org, project, deployment ID, branch, tables) and confirm before proceeding.
 
 ---
@@ -259,33 +255,105 @@ git commit -m "perf: add benchmark scaffold and target interface"
 git push -u origin perf/baseline
 ```
 
-### 4d. Wait for baseline deployment and resolve the baseline DB
+### 4d. Wait for baseline deployment, export shared branch credentials once, and resolve the baseline DB
 
 ```
 514 agent deployment list --project <PROJECT> --json
 ```
 
-Poll until the baseline deployment appears. Resolve the baseline DB name.
+Poll until the baseline deployment appears.
+
+Then export the branch's platform variables into the benchmark scaffold's `.env.preview` file once. Treat this file as the shared ClickHouse connection layer for the benchmark scaffold: host, port, auth, SSL, and any other platform-managed connection settings should come from this one export and be reused across baseline and candidate runs.
+
+```bash
+514 env list --project <PROJECT> -b perf/baseline --platform --dotenv > .env.preview
+```
+
+Confirm `.env.preview` contains the ClickHouse connection value the benchmark scaffold actually uses. Prefer a URL-shaped contract from platform vars:
+
+- `MOOSE_CLICKHOUSE_CONFIG__URL`
+
+If the benchmark scaffold needs split Moose ClickHouse env vars instead of a single URL, add a small parsing step in the benchmark setup script to derive and write these keys into `.env.preview` from `MOOSE_CLICKHOUSE_CONFIG__URL`:
+
+- `MOOSE_CLICKHOUSE_CONFIG__HOST`
+- `MOOSE_CLICKHOUSE_CONFIG__HOST_PORT`
+- `MOOSE_CLICKHOUSE_CONFIG__USER`
+- `MOOSE_CLICKHOUSE_CONFIG__PASSWORD`
+- `MOOSE_CLICKHOUSE_CONFIG__DB_NAME`
+- `MOOSE_CLICKHOUSE_CONFIG__USE_SSL`
+
+Derive them with these rules:
+
+- host: URL hostname
+- host port: URL port
+- user: URL username
+- password: URL password
+- db name: URL path database segment
+- use SSL: `true` when the URL scheme is HTTPS, otherwise `false`
+
+Do this derivation once when preparing `.env.preview`. The derived host, port, user, password, and SSL values become the shared benchmark connection settings for every run.
+
+Resolve the branch-specific database name separately and store it as `BASELINE_DB`. If the scaffold or generated env file already includes `MOOSE_CLICKHOUSE_CONFIG__DB_NAME`, use that value. Otherwise, parse the database name from `MOOSE_CLICKHOUSE_CONFIG__URL` and write the derived `MOOSE_CLICKHOUSE_CONFIG__DB_NAME` into `.env.preview`.
+
+After `.env.preview` exists, do not re-export host, port, user, password, SSL, or other shared platform-managed settings for each candidate branch. Reuse the same `.env.preview` file and only change the branch-specific database name when switching benchmark targets.
+
+If the deployment appears but the env vars cannot be resolved, `.env.preview` cannot be populated, `MOOSE_CLICKHOUSE_CONFIG__URL` is missing, or any required derived ClickHouse env var cannot be produced from the URL, stop and carry a blocker instead of guessing.
 
 ### 4e. Ensure baseline has comparable seed data
 
-Check row counts on the baseline deployment. **Prompt the user** before running:
+First, resolve `BENCHMARK_TABLES` from Stage 2d. These are the only tables that need comparable data on preview branches.
+
+For this workflow, **comparable seed data** means:
+
+- the same benchmark-relevant tables exist on baseline and every candidate branch
+- the seeded slice exercises the same filters, joins, sort order, and query shape discovered during profiling
+- the same seed strategy is reused across baseline and every candidate branch
+- if joins are involved, the seeded tables preserve enough overlapping keys for the benchmark query to return representative results
+
+Check row counts for benchmark-relevant tables on the baseline deployment. **Prompt the user** before running:
 
 ```
-514 clickhouse query 'SELECT table, sum(rows) AS total_rows FROM system.parts WHERE active = 1 AND database NOT IN ('\''system'\'','\''INFORMATION_SCHEMA'\'','\''information_schema'\'') GROUP BY table' --project <PROJECT> --branch perf/baseline --json
+514 clickhouse query 'SELECT table, sum(rows) AS total_rows FROM system.parts WHERE active = 1 AND database = '\''<BASELINE_DB>'\'' AND table IN (<BENCHMARK_TABLE_LIST>) GROUP BY table ORDER BY table' --project <PROJECT> --branch perf/baseline --json
 ```
 
-If tables that the benchmark queries read from have insufficient data, re-seed from production. **Prompt the user** showing each INSERT statement:
+Store this as `BASELINE_SEED_COUNTS`.
+
+If any benchmark-relevant table has insufficient data to exercise the profiled query shape, re-seed from production using a deterministic slice that you can reuse for every candidate branch.
+
+Prefer this order when defining the seed slice:
+
+1. reuse an existing filter window from the profiled query pattern
+2. seed a deterministic subset with an explicit `--where` filter
+3. fall back to `LIMIT` only when no better slice is available, and record that caveat in the parity notes later
+
+Store the chosen seed strategy and any caveats as `BASELINE_SEED_NOTES`.
+
+Before re-seeding a table, decide whether append is safe. `514 clickhouse seed` copies rows into the target branch and does not expose a separate truncate step. If re-running the seed would create duplicate rows that distort the benchmark, stop and carry a blocker instead of issuing an unsafe reseed command.
+
+Example seed pattern:
 
 ```
-514 clickhouse query 'INSERT INTO <BASELINE_DB>.<TABLE> SELECT * FROM <PROD_DB>.<TABLE> LIMIT 10000' --project <PROJECT> --branch perf/baseline --json
+514 clickhouse seed <TABLE> --project <PROJECT> --branch perf/baseline --from <BRANCH> --where "<DETERMINISTIC_FILTER>" --limit <SEED_LIMIT> --json
 ```
 
 Preview and production share the same ClickHouse cluster — this cross-database pattern is the standard seeding mechanism.
 
+After re-seeding, re-run the row-count query for `BENCHMARK_TABLES` and update `BASELINE_SEED_COUNTS`. If the counts still do not reflect a comparable seed set, stop and carry a blocker before benchmarking.
+
 ### 4f. Prove the benchmark runs on baseline
 
-Run the benchmark suite against the baseline DB:
+Before running the benchmark suite, verify that the baseline branch has all required evidence:
+
+- `BENCHMARK_TABLES`
+- `BASELINE_DB`
+- `.env.preview`
+- `BASELINE_SEED_COUNTS`
+- `BASELINE_SEED_NOTES`
+- the exact seed strategy used for each benchmark-relevant table
+
+If any of these artifacts are missing, stop and carry a blocker before continuing.
+
+Run the benchmark suite against the shared branch credentials loaded through `.env.preview`, while temporarily overriding only the database name for the current benchmark target:
 
 ```bash
 MOOSE_CLICKHOUSE_CONFIG__DB_NAME=<BASELINE_DB> pnpm test:perf
@@ -293,10 +361,15 @@ MOOSE_CLICKHOUSE_CONFIG__DB_NAME=<BASELINE_DB> pnpm test:perf
 
 Capture the baseline report path under `reports/`. If the benchmark fails, stop and fix before creating candidate branches.
 
+If the benchmark succeeds but no report path is produced, stop and carry a blocker before creating candidate branches.
+
 Artifacts from this stage:
 
 - `BASELINE_BRANCH=perf/baseline`
 - `BASELINE_DB`
+- `.env.preview`
+- `BASELINE_SEED_COUNTS`
+- `BASELINE_SEED_NOTES`
 - baseline benchmark report under `reports/`
 
 ---
@@ -310,14 +383,19 @@ Goal: For each approved candidate, implement the optimization, deploy, seed, and
 Run candidates in parallel when possible. Each candidate should run in its own git worktree so sub-agents can work simultaneously without branch conflicts.
 
 **Coordinator** owns:
+
 - creating worktrees from the frozen baseline
 - dispatching one sub-agent per candidate
 - collecting results after all sub-agents complete
 
 **Each sub-agent** owns one candidate in its own worktree and returns:
+
 - `candidate_name`
 - `candidate_branch`
 - `candidate_db`
+- `candidate_seed_counts`
+- `candidate_explains`
+- `candidate_verification_notes`
 - `report_path` (absolute path to the benchmark report JSON)
 - `status` (`success` or `blocked`)
 - `failure_reason` (if blocked)
@@ -327,59 +405,59 @@ Run candidates in parallel when possible. Each candidate should run in its own g
 Each sub-agent runs the following steps in its worktree:
 
 1. Branch from baseline:
-
-   ```bash
+  ```bash
    git checkout perf/baseline
    git checkout -b perf/candidate-<name>
-   ```
-
+  ```
 2. Apply exactly one optimization strategy by editing the Moose data model files, SQL resources, or materialized view definitions.
-
-3. If the change is destructive (ORDER BY / engine change), rely on Moose versioned-table behavior.
-
+3. If the change is destructive (ORDER BY / engine change), rely on Moose versioned-table behavior. Resolve the new physical table name before seeding or benchmarking. If the target table cannot be identified unambiguously, stop and return a blocker instead of guessing.
 4. Update the benchmark target interface so only the minimal target change is introduced — usually the `table` reference that points at the versioned or optimized table.
-
 5. Validate locally:
-
-   ```bash
+  ```bash
    moose dev --timestamps
-   ```
-
+  ```
 6. Commit and push:
-
-   ```bash
+  ```bash
    git add -A
    git commit -m "perf: candidate <name>"
    git push -u origin perf/candidate-<name>
-   ```
-
+  ```
 7. Wait for the candidate deployment and resolve the candidate DB name.
 
-8. Check row counts and re-seed if needed, using the same approach as Stage 4e. For tables that lost data due to destructive changes, re-seed from production.
+   Overwrite `MOOSE_CLICKHOUSE_CONFIG__DB_NAME`, but reuse the rest of the env vars that you set previously in `.env.preview`.
 
-   If column types changed between baseline and candidate, compare `system.columns` between the two databases and construct an explicit column list with CAST expressions. **Show the user the cast mapping** before executing.
-
-9. After re-seeding, poll part counts to confirm data has settled:
-
-   ```
-   514 clickhouse query 'SELECT table, count() AS parts FROM system.parts WHERE active = 1 AND database NOT IN ('\''system'\'','\''INFORMATION_SCHEMA'\'','\''information_schema'\'') GROUP BY table ORDER BY parts DESC' --project <PROJECT> --branch perf/candidate-<name> --json
-   ```
-
-   **Prompt the user** before running. If part counts are high, wait briefly and re-check.
-
-10. Run the benchmark suite against the candidate DB:
-
-    ```bash
+   If the candidate database name cannot be resolved unambiguously, stop and return a blocker instead of guessing.
+8. Check row counts for `BENCHMARK_TABLES` on the candidate deployment using the same query pattern and the same seed strategy captured in Stage 4e.
+  **Prompt the user once** showing the exact row-count SQL and any fully resolved `514 clickhouse seed` command before executing.
+   Seed candidate tables from `perf/baseline`, not from production. The candidate branches should copy the benchmark-relevant data set from the frozen baseline branch so every experiment runs against the same rows.
+   For each table in `BENCHMARK_TABLES`, use the baseline branch as the source:
+   Use this full-table copy from baseline even when the baseline itself was originally seeded from a filtered production slice. The candidate branch should inherit the exact baseline data set rather than re-evaluating the production seed filter independently.
+   If column types changed between baseline and candidate, stop and carry a blocker. `514 clickhouse seed` copies `SELECT` * between matching tables, so type-changing reseeds need a follow-up workflow or CLI support that can express cast mappings safely.
+   If re-running the seed would create duplicate rows that distort the benchmark, stop and carry a blocker instead of issuing a duplicate-producing seed command.
+9. After seeding or re-seeding, capture `CANDIDATE_SEED_COUNTS` for `BENCHMARK_TABLES` and compare them to `BASELINE_SEED_COUNTS`.
+  If the candidate counts are not comparable to baseline, or the seed strategy drifted from Stage 4e, stop and return a blocker before benchmarking.
+10. Capture candidate EXPLAIN plans for the benchmark query set using the candidate DB and store them as `CANDIDATE_EXPLAINS`.
+  Reuse the same EXPLAIN shape from Stage 2e. **Prompt the user once** showing the exact EXPLAIN SQL before executing.
+11. Run the benchmark suite against the shared branch credentials loaded through `.env.preview`, while temporarily overriding only the database name for the candidate target:
+  ```bash
     MOOSE_CLICKHOUSE_CONFIG__DB_NAME=<CANDIDATE_DB> pnpm test:perf
-    ```
-
-11. Return the report path and status to the coordinator.
+  ```
+    If the benchmark succeeds but no report path is produced, stop and return a blocker.
+12. Record `candidate_verification_notes` summarizing:
+  - the seed strategy used
+    - any approved caveats or fallback-to-`LIMIT` decisions
+    - whether counts matched baseline closely enough to proceed
+    - any follow-up questions Stage 6 must resolve during parity review
+13. Return the report path, `candidate_seed_counts`, `candidate_explains`, `candidate_verification_notes`, and status to the coordinator.
 
 ### Coordinator collection
 
 After all sub-agents complete, the coordinator collects:
+
 - the baseline report path from Stage 4
-- each candidate's report path, branch, DB, and status
+- `BASELINE_SEED_COUNTS`
+- `BASELINE_SEED_NOTES`
+- each candidate's report path, branch, DB, `candidate_seed_counts`, `candidate_explains`, `candidate_verification_notes`, and status
 
 If any candidate is blocked, report the failure reason and proceed with the remaining candidates.
 
@@ -390,24 +468,35 @@ If any candidate is blocked, report the failure reason and proceed with the rema
 Goal: Compare baseline and candidate benchmark reports and select a winner.
 
 1. Read the baseline report and each candidate report using the paths collected by the coordinator.
+2. For each candidate, collect the required comparison evidence before ranking performance:
+  - baseline benchmark report path
+  - candidate benchmark report path
+  - `BASELINE_EXPLAINS`
+  - `CANDIDATE_EXPLAINS`
+  - `BASELINE_SEED_COUNTS`
+  - `candidate_seed_counts`
+  - `BASELINE_SEED_NOTES`
+  - `candidate_verification_notes`
+   If any required comparison artifact is missing, stop and carry a blocker instead of comparing partial evidence.
+3. For each candidate, verify:
+  - data parity: the candidate used comparable benchmark-relevant tables and row counts relative to baseline
+  - result parity: the benchmark target still returns the same results, or any intentional difference is documented and approved
+  - SQL parity: the query shape stays the same apart from the intended optimization
+  - EXPLAIN parity: plan changes are understood and consistent with the intended optimization
+   Treat parity failure separately from a performance regression. A candidate with missing or failed parity evidence is not eligible to win until the issue is fixed or the user explicitly approves proceeding with the gap.
+4. Build a ranked comparison table across all reports:
 
-2. For each candidate, verify:
-   - data checksum parity (same data, same results)
-   - SQL parity (same query shape apart from the intended optimization)
+  | Metric            | Baseline | Candidate A | Candidate B | ... |
+  | ----------------- | -------- | ----------- | ----------- | --- |
+  | Duration p50 (ms) | X        | Y           | Z           | ... |
+  | Duration p95 (ms) | X        | Y           | Z           | ... |
+  | Rows read         | X        | Y           | Z           | ... |
+  | EXPLAIN: granules | X        | Y           | Z           | ... |
 
-3. Build a ranked comparison table across all reports:
-
-   | Metric            | Baseline | Candidate A | Candidate B | ... |
-   | ----------------- | -------- | ----------- | ----------- | --- |
-   | Duration p50 (ms) | X        | Y           | Z           | ... |
-   | Duration p95 (ms) | X        | Y           | Z           | ... |
-   | Rows read         | X        | Y           | Z           | ... |
-   | EXPLAIN: granules | X        | Y           | Z           | ... |
-
-4. Recommend the winning candidate based on the ranked comparison. If any metric regressed, use AskUserQuestion to ask the user how to proceed:
-   - Option A: Fix the issues and re-run the experiment
-   - Option B: Revert specific changes
-   - Option C: Accept and continue to ship
+5. Recommend the winning candidate based on the ranked comparison and the parity review. If any metric regressed, or any required comparison evidence is missing, use AskUserQuestion to ask the user how to proceed:
+  - Option A: Fix the issues and re-run the experiment
+  - Option B: Revert specific changes
+  - Option C: Accept and continue to ship
 
 ---
 
@@ -416,22 +505,21 @@ Goal: Compare baseline and candidate benchmark reports and select a winner.
 Goal: Create a pull request for the winning candidate and route to rollout planning.
 
 1. Checkout the winning candidate branch.
-
 2. Build a PR body that includes:
-   - summary of the optimization applied
-   - benchmark comparison table from Stage 6
-   - EXPLAIN diffs (baseline vs winner)
-   - re-seed notes (which tables were re-seeded and why)
-   - caveats about preview data volume (~10K rows) and how to interpret results
-   - recommendations for monitoring post-merge
-
+  - summary of the optimization applied
+  - benchmark comparison table from Stage 6
+  - EXPLAIN diffs (baseline vs winner)
+  - parity summary explaining why the comparison was valid
+  - re-seed notes (which tables were re-seeded and why)
+  - any missing validation evidence or explicit user-approved gaps
+  - caveats about preview data volume (~10K rows) and how to interpret results
+  - recommendations for monitoring post-merge
+   Do not create the PR until the required comparison evidence exists, or the user explicitly approves proceeding with documented gaps.
 3. Create the PR:
-
-   ```bash
+  ```bash
    git push -u origin HEAD
    gh pr create --title "perf: <optimization summary>" --body "<generated PR body>"
-   ```
-
+  ```
 4. Report the PR URL to the user.
 
 Production rollout planning belongs to `production-rollout-plan`. This skill stops at the PR.
