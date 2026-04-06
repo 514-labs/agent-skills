@@ -10,9 +10,8 @@ allowed-tools:
 description: >
   Use when a developer has a chosen schema, model, or query change in a
   514/Moose project and needs a safe path to production, including rollout
-  classification, generated migration evidence, validation steps, rollback
-  guidance, backfill expectations, cutover planning, and explicit approval
-  gates.
+  classification, validation steps, rollback guidance, backfill expectations,
+  cutover planning, and explicit approval gates.
 ---
 
 # Production Rollout Planning
@@ -25,15 +24,11 @@ If the user provided a project slug as an argument, use it to skip the project s
 
 Commands fall into three categories:
 
-**Guardrailed read-only:** `514 agent auth whoami`, `514 agent project list`, `514 agent deployment list`, `514 agent table list`, `514 agent materialized-view list`, `514 agent sql-resource list`, `514 deployment list`, `514 env list`, `514 env get`, `git branch --show-current`, `git status --short`, `git diff --name-only`, `gh pr view`, `moose ls`, `moose generate migration`
-
-**Local generation:** `moose generate hash-token`
-
-**Mutating remote target (require user approval):** `514 env set` and any step that intentionally changes credentials on the target environment or requires a redeploy before migration generation can continue.
+**Guardrailed read-only:** `514 agent auth whoami`, `514 agent project list`, `514 agent deployment list`, `514 agent table list`, `514 agent materialized-view list`, `514 agent sql-resource list`, `514 deployment list`, `514 env list`, `514 env get`, `git branch --show-current`, `git status --short`, `git diff --name-only`, `gh pr view`, `moose ls`
 
 **Raw ClickHouse (require user approval):** Any `514 clickhouse query` invocation used to inspect current production state or define validation SQL.
 
-Before running `514 env set` or any `514 clickhouse query` command, use AskUserQuestion to show the user the exact command or SQL and get explicit approval.
+Before running any `514 clickhouse query` command, use AskUserQuestion to show the user the exact command or SQL and get explicit approval.
 
 ---
 
@@ -88,72 +83,15 @@ Goal: Identify the project, exact target deployment, local change context, and r
    - `TARGET_DEPLOY_BRANCH`
    - `TARGET_DEPLOY_URL`
 
-6. Resolve how `moose generate migration` will authenticate to the remote Moose Admin API for the chosen target deployment.
-
-   Check whether the remote Moose Admin API is already configured on `TARGET_DEPLOY_BRANCH`:
-
-   ```bash
-   514 env get MOOSE_AUTHENTICATION__ADMIN_API_KEY --project <PROJECT> --branch <TARGET_DEPLOY_BRANCH> --json
-   ```
-
-   Then use AskUserQuestion to ask whether the user has `MOOSE_ADMIN_TOKEN` or another intentionally stored plain bearer token available from secure local storage or project envs.
-
-   Decision table:
-
-   | Remote hash present? | Bearer token present? | Action                                                  |
-   | -------------------- | --------------------- | ------------------------------------------------------- |
-   | yes                  | yes                   | proceed to migration generation                         |
-   | yes                  | no                    | stop and ask whether to rotate credentials              |
-   | no                   | yes                   | stop and ask whether to bootstrap remote Admin API auth |
-   | no                   | no                    | stop and ask whether to bootstrap remote Admin API auth |
-
-   Do not assume `514 auth login` credentials can be reused as the Moose admin API bearer token.
-   Do not assume a bearer token can be recovered from `MOOSE_AUTHENTICATION__ADMIN_API_KEY`. It cannot.
-
-   Only if the hash is missing and the user explicitly approves auth remediation, use this sequence:
-   1. Generate a fresh token pair:
-
-      ```bash
-      moose generate hash-token --json
-      ```
-
-      Capture:
-      - `api_key_hash`
-      - `bearer_token`
-
-   2. Set the hashed key on the target environment:
-
-      ```bash
-      514 env set --project <PROJECT> --branch <TARGET_DEPLOY_BRANCH> MOOSE_AUTHENTICATION__ADMIN_API_KEY=<api_key_hash>
-      ```
-
-   3. Store the plain token securely for the client side as `MOOSE_ADMIN_TOKEN`, or pass it directly as `--token <bearer_token>` to `moose generate migration`.
-
-   4. Wait for or trigger the target branch redeploy using the repo's normal deployment mechanism. Do not assume the new hash is active until the target deployment is healthy again.
-
-   5. Only after the redeploy is healthy, proceed to migration generation.
-
-   If the user does not approve remediation, or the environment cannot be redeployed safely, stop and carry a blocker.
-
 ---
 
 ## Stage 2 — MIGRATION PLANNING
 
 Goal: Generate the migration plan against the target deployment, review the generated artifacts, classify rollout risk, and produce the rollout plan.
 
-### Generate
+### Gather migration artifacts
 
-1. Generate the migration plan from the current branch state against the resolved remote Moose target:
-
-   ```bash
-   moose generate migration --save --url <TARGET_DEPLOY_URL> --token <MOOSE_ADMIN_TOKEN>
-   ```
-
-   If `MOOSE_ADMIN_TOKEN` is already set in the local environment, the command may omit `--token`.
-
-   Do not run `moose generate migration` without the remote target flags. The plan is only valid if it was generated against the intended remote production state.
-
-2. Confirm that all three artifacts were written to `migrations/`:
+1. Confirm that migration artifacts exist in `migrations/`:
 
    | File | Purpose |
    |------|---------|
