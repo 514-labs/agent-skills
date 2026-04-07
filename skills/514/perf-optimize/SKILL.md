@@ -240,16 +240,17 @@ Run candidates in parallel via git worktrees. **Coordinator** creates worktrees 
 4. Update the benchmark target interface (usually just the `table` reference).
 5. Validate locally: `moose dev --timestamps`
 6. Commit and push: `git add -A && git commit -m "perf: candidate <name>" && git push -u origin perf/candidate-<name>`
-7. Wait for deployment. Re-export `.env.preview` for the candidate branch per [references/credentials.md](references/credentials.md). Carry a blocker if credentials cannot be resolved.
+7. Wait for deployment.
 8. **Seed from baseline, not production.** Prompt the user once with the row-count SQL and `514 clickhouse seed` commands.
    - Copy each `BENCHMARK_TABLES` entry from `perf/baseline`: `514 clickhouse seed <TABLE> --project <PROJECT> --branch perf/candidate-<name> --from perf/baseline --json`
    - Do not recompute `SAMPLE_SIZES` — candidates inherit baseline's exact data set.
    - Carry a blocker if column types changed (seed copies `SELECT *`; casts need CLI support) or if a reseed would duplicate rows.
 9. Capture `CANDIDATE_SEED_COUNTS` and compare to `BASELINE_SEED_COUNTS`. Carry a blocker if not comparable.
 10. Capture `CANDIDATE_EXPLAINS` using the same EXPLAIN shape from 2e (**prompt user**).
-11. Run benchmark: `pnpm test:perf` (`.env.preview` already targets this candidate). Carry a blocker if no report.
-12. Record `candidate_verification_notes` (seed strategy, caveats, count comparison, open questions for Stage 6).
-13. Return all artifacts to the coordinator.
+11. Re-generate `.env.preview` for the candidate branch per [references/credentials.md](references/credentials.md). Carry a blocker if credentials cannot be resolved.
+12. Run benchmark: `pnpm test:perf` (`.env.preview` already targets this candidate). Carry a blocker if no report.
+13. Record `candidate_verification_notes` (seed strategy, caveats, count comparison, open questions for Stage 6).
+14. Return all artifacts to the coordinator.
 
 ### Coordinator collection
 
