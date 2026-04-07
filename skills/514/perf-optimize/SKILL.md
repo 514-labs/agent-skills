@@ -188,7 +188,7 @@ git push -u origin perf/baseline
 
 Poll `514 agent deployment list --project <PROJECT> --json` until the baseline deployment appears.
 
-Follow [references/credentials.md](references/credentials.md) to export shared ClickHouse credentials into `.env.preview` once. Resolve `BASELINE_DB`. Carry a blocker if credentials cannot be resolved.
+Follow [references/credentials.md](references/credentials.md) to export the baseline branch's ClickHouse credentials into `.env.preview`. Carry a blocker if credentials cannot be resolved.
 
 ### 4e. Ensure baseline has comparable seed data
 
@@ -212,10 +212,10 @@ After seeding, re-check row counts and update `BASELINE_SEED_COUNTS`. Carry a bl
 
 ### 4f. Prove the benchmark runs
 
-Verify all artifacts exist: `BENCHMARK_TABLES`, `BASELINE_DB`, `.env.preview`, `SAMPLE_SIZES`, `BASELINE_SEED_COUNTS`, `BASELINE_SEED_NOTES`. Carry a blocker if any are missing.
+Verify all artifacts exist: `BENCHMARK_TABLES`, `.env.preview`, `SAMPLE_SIZES`, `BASELINE_SEED_COUNTS`, `BASELINE_SEED_NOTES`. Carry a blocker if any are missing.
 
 ```bash
-MOOSE_CLICKHOUSE_CONFIG__DB_NAME=<BASELINE_DB> pnpm test:perf
+pnpm test:perf
 ```
 
 Capture the report path under `reports/`. If the benchmark fails or produces no report, stop and fix before proceeding.
@@ -230,7 +230,7 @@ Goal: For each approved candidate, implement, deploy, seed from baseline, and be
 
 Run candidates in parallel via git worktrees. **Coordinator** creates worktrees from `perf/baseline` and dispatches one sub-agent per candidate. Each sub-agent returns:
 
-`candidate_name`, `candidate_branch`, `candidate_db`, `candidate_seed_counts`, `candidate_explains`, `candidate_verification_notes`, `report_path`, `status` (`success` | `blocked`), `failure_reason`
+`candidate_name`, `candidate_branch`, `candidate_seed_counts`, `candidate_explains`, `candidate_verification_notes`, `report_path`, `status` (`success` | `blocked`), `failure_reason`
 
 ### Per-candidate workflow
 
@@ -240,14 +240,14 @@ Run candidates in parallel via git worktrees. **Coordinator** creates worktrees 
 4. Update the benchmark target interface (usually just the `table` reference).
 5. Validate locally: `moose dev --timestamps`
 6. Commit and push: `git add -A && git commit -m "perf: candidate <name>" && git push -u origin perf/candidate-<name>`
-7. Wait for deployment. Override `MOOSE_CLICKHOUSE_CONFIG__DB_NAME` in `.env.preview`; reuse all other shared credentials. Carry a blocker if the DB name is ambiguous.
+7. Wait for deployment. Re-export `.env.preview` for the candidate branch per [references/credentials.md](references/credentials.md). Carry a blocker if credentials cannot be resolved.
 8. **Seed from baseline, not production.** Prompt the user once with the row-count SQL and `514 clickhouse seed` commands.
    - Copy each `BENCHMARK_TABLES` entry from `perf/baseline`: `514 clickhouse seed <TABLE> --project <PROJECT> --branch perf/candidate-<name> --from perf/baseline --json`
    - Do not recompute `SAMPLE_SIZES` — candidates inherit baseline's exact data set.
    - Carry a blocker if column types changed (seed copies `SELECT *`; casts need CLI support) or if a reseed would duplicate rows.
 9. Capture `CANDIDATE_SEED_COUNTS` and compare to `BASELINE_SEED_COUNTS`. Carry a blocker if not comparable.
 10. Capture `CANDIDATE_EXPLAINS` using the same EXPLAIN shape from 2e (**prompt user**).
-11. Run benchmark: `MOOSE_CLICKHOUSE_CONFIG__DB_NAME=<CANDIDATE_DB> pnpm test:perf`. Carry a blocker if no report.
+11. Run benchmark: `pnpm test:perf` (`.env.preview` already targets this candidate). Carry a blocker if no report.
 12. Record `candidate_verification_notes` (seed strategy, caveats, count comparison, open questions for Stage 6).
 13. Return all artifacts to the coordinator.
 

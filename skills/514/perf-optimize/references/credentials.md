@@ -1,14 +1,14 @@
 # ClickHouse Credential Setup for Benchmarks
 
-## Export shared credentials once
+## Export credentials per branch
 
-Export platform variables into the benchmark scaffold's `.env.preview` from the baseline branch. This file becomes the shared ClickHouse connection layer for every benchmark run.
+Before running benchmarks against any branch, export that branch's platform variables into `.env.preview`. Re-export each time you switch benchmark targets.
 
 ```bash
-514 env list --project <PROJECT> -b perf/baseline --platform --dotenv > .env.preview
+514 env list --project <PROJECT> -b <BRANCH> --platform --dotenv > .env.preview
 ```
 
-Replace `perf/baseline` with the actual baseline branch name if it differs.
+This gives the benchmark scaffold a complete, self-contained set of credentials for the target branch — no manual overrides needed.
 
 ## Expected env vars
 
@@ -22,15 +22,8 @@ The platform export writes both the full connection URL and the individual split
 | `MOOSE_CLICKHOUSE_CONFIG__USER` | Username |
 | `MOOSE_CLICKHOUSE_CONFIG__PASSWORD` | Password |
 | `MOOSE_CLICKHOUSE_CONFIG__DB_NAME` | Database name |
-Validate that `.env.preview` contains the vars the benchmark scaffold actually reads. The split vars are ready to use directly — no URL parsing step is needed.
 
-## Resolving the baseline DB name
-
-Store as `BASELINE_DB`. Read `MOOSE_CLICKHOUSE_CONFIG__DB_NAME` from `.env.preview`.
-
-## Reuse across candidate branches
-
-After `.env.preview` exists, do not re-export shared settings (host, port, user, password, SSL) for each candidate. Only override `MOOSE_CLICKHOUSE_CONFIG__DB_NAME` when switching benchmark targets.
+Validate that `.env.preview` contains the vars the benchmark scaffold actually reads.
 
 ## Blocker conditions
 
