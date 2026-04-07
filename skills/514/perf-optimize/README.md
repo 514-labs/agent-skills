@@ -2,7 +2,7 @@
 
 A **workflow skill** for profiling, benchmarking, and selecting ClickHouse optimizations in a 514/Moose deployment.
 
-Unlike rule-based skills, this skill is a single `SKILL.md` with no rules directory or build system. Edit `SKILL.md` directly.
+Unlike rule-based skills, this skill has no rules directory or build system. Core workflow lives in `SKILL.md`; detailed reference material (credential setup, diagnostic SQL templates) lives in `references/`.
 
 ## What it does
 
@@ -44,4 +44,4 @@ Use:
 
 ## Editing
 
-This is a workflow skill — all logic lives in `SKILL.md`. There is no build step.
+This is a workflow skill — edit `SKILL.md` for workflow changes and `references/*.md` for detailed procedure updates. There is no build step.

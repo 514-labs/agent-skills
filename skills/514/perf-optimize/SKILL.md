@@ -10,120 +10,82 @@ allowed-tools:
   - Grep
   - AskUserQuestion
 description: >
-  Guided ClickHouse performance optimization workflow.
-  Profiles a 514/Moose deployment, identifies slow queries,
-  proposes optimization candidates, benchmarks baseline vs candidates
-  on preview deployments, and ships the winner as a PR.
+  Guided ClickHouse performance optimization workflow for 514/Moose deployments.
+  Profiles slow queries, proposes schema/index/MV candidates, benchmarks baseline
+  vs candidates on preview branches, and ships the winner as a PR. Use when asked
+  to optimize ClickHouse, speed up queries, benchmark schema changes, tune
+  performance, or profile a Moose deployment.
 ---
 
 # ClickHouse Performance Optimization
 
-Run through seven stages sequentially: **SETUP → PROFILE → PROPOSE → BASELINE → EXPERIMENT → COMPARE → SHIP**.
-Complete each stage fully before moving to the next. Use conversation context as state—no external persistence needed.
+Seven stages, run sequentially: **SETUP → PROFILE → PROPOSE → BASELINE → EXPERIMENT → COMPARE → SHIP**.
+Complete each stage fully before moving to the next. Use conversation context as state.
 
-If the user provided a project slug as an argument, use it to skip the project selection prompt in Stage 1.
+If the user provided a project slug as an argument, skip the project selection prompt in Stage 1.
 
 ## Command safety
 
-Commands fall into two categories:
-
 **Guardrailed (run freely):** `514 agent auth whoami`, `514 agent project list`, `514 agent deployment list`, `514 agent table list`, `514 agent materialized-view list`, `514 agent sql-resource list`, `514 agent metrics query`, `514 logs query`, `moose add benchmark`, `moose dev`, `moose ls`, `pnpm test:perf`
 
-**Raw ClickHouse (require user approval):** Any `514 clickhouse query` invocation — including `SHOW CREATE TABLE`, `system.parts` queries, `EXPLAIN`, benchmark query replay, and `INSERT INTO` for re-seeding.
+**Require user approval before running:**
 
-Before running any `514 clickhouse query` command, use AskUserQuestion to show the user the exact SQL and get explicit approval.
+- `514 env list --platform --dotenv` — emits platform secrets; pipe directly to `.env.*`, not for inspection
+- Any `514 clickhouse query` — including `SHOW CREATE TABLE`, `system.parts`, `EXPLAIN`, benchmark replay
+- Any `514 clickhouse seed` — copies rows from a source branch into a preview branch
+
+Use AskUserQuestion to show the exact command or fully-resolved SQL and get explicit approval. Never show a template with unresolved placeholders.
+
+**Ambiguity rule:** If deployment, database, or table resolution is ambiguous at any point, stop and carry a blocker instead of guessing. This rule applies throughout all stages — later stages reference it as "carry a blocker" without repeating the full rationale.
 
 ## Benchmark contract
 
-The benchmark suite is branch-agnostic. Every branch must expose the same benchmark target interface for the production query pattern being tested.
+Every branch must expose the same benchmark target interface for the production query pattern being tested. Prefer this discovery order:
 
-The benchmark target interface is the code-level representation of the real query or API discovered during profiling. Prefer this order:
+1. an existing `defineQueryModel` export matching the target query shape
+2. an exported SQL template literal or query-builder function
+3. another codified query/API entrypoint faithfully representing the query
+4. if none exists, define a query model matching the discovered production pattern
 
-- an existing `defineQueryModel` export that already represents the target query shape
-- an existing exported SQL template literal or query-builder function
-- another codified application query/API entrypoint that faithfully represents the target query shape
-- if no codified query/API entrypoint exists, define a query model that matches the discovered production query pattern
+Do not invent a synthetic benchmark query disconnected from production.
 
-Do not invent a synthetic benchmark query disconnected from the production query pattern.
-
-Across baseline and all candidate branches:
-
-- the same query/API entrypoint stays under test
-- dimensions, metrics, filters, sortable fields, and defaults stay the same
-- the SQL shape and call pattern stay the same apart from the intended optimization
-- only the `table` reference changes per candidate branch
+Across all branches: the same entrypoint stays under test, dimensions/metrics/filters/defaults stay the same, only the `table` reference changes per candidate.
 
 ## Sample sizing
 
-When seeding preview branches from production, compute a representative sample size per table using this tiering table:
+When seeding preview branches from production, compute sample sizes per table:
 
 | Prod row count | Sample size | Rationale |
 | -------------- | ----------- | --------- |
-| < 100K | All rows (no LIMIT) | Already small; copy everything |
-| 100K – 1M | 100,000 | ~12 granules; enough for index/granule-skip differences |
-| 1M – 100M | 1% of rows | Multiple partitions, realistic merge behavior |
-| 100M – 1B | 0.1% of rows (min 1M) | Caps transfer while exercising all features |
-| > 1B | 0.01% of rows (min 1M, max 10M) | Hard cap prevents preview storage blow-up |
+| < 100K | All rows | Already small |
+| 100K - 1M | 100,000 | ~12 granules; enough for index-skip diffs |
+| 1M - 100M | 1% of rows | Multiple partitions, realistic merge behavior |
+| 100M - 1B | 0.1% (min 1M) | Caps transfer while exercising features |
+| > 1B | 0.01% (min 1M, max 10M) | Prevents preview storage blow-up |
 
-The 100K floor ensures enough granules (ClickHouse default = 8,192 rows) for EXPLAIN to show meaningful skipping differences. The 10M ceiling keeps transfer time under a few minutes and preview storage under ~5 GB per table.
-
-Always present the computed sample sizes to the user for approval before seeding. Store final sizes as `SAMPLE_SIZES` for reuse across branches.
+Present computed sizes to the user for approval before seeding. Store as `SAMPLE_SIZES`.
 
 ---
 
 ## Stage 1 — SETUP
 
-Goal: Authenticate, identify the target project, find the active deployment, and capture baseline DDL.
+Goal: Authenticate, identify the target project, find the active deployment, capture baseline DDL.
 
-1. Verify authentication:
-
-   ```
-   514 agent auth whoami --json
-   ```
-
-   If this fails, stop and tell the user to run `514 auth login` first.
-
-2. List available projects:
-
-   ```
-   514 agent project list --json
-   ```
-
-   If the user provided a project slug as an argument, match it from the list.
-   Otherwise, ask the user which project to optimize using AskUserQuestion.
-
-3. List deployments for the selected project:
-
-   ```
-   514 agent deployment list --project <PROJECT> --json
-   ```
-
-   `<PROJECT>` is `<ORG/PROJECT>` format (e.g., `acme/analytics`).
-
-   Identify the **active production deployment** (highest priority: status "active" or "running").
-   Capture both the **deployment ID** (for resource listing commands) and the **branch name** (for metrics/clickhouse/logs commands).
-
-4. List tables to discover the full set:
-
-   ```
-   514 agent table list <DEPLOY_ID> --project <PROJECT> --json
-   ```
-
-5. Capture CREATE TABLE DDL for each table. **Prompt the user first** — show the list of tables and the SHOW CREATE TABLE statements you intend to run, then get approval:
-
-   ```
-   514 clickhouse query 'SHOW CREATE TABLE <DB>.<TABLE>' --project <PROJECT> --branch <BRANCH> --json
-   ```
-
-   Store the DDL as `BASELINE_DDL` — this is needed for schema comparison in Stage 6.
-
-6. Summarize what was found (user, org, project, deployment ID, branch, tables) and confirm before proceeding.
+1. Verify auth: `514 agent auth whoami --json`. If it fails, stop — user must run `514 auth login`.
+2. List projects: `514 agent project list --json`. Match the argument slug or ask via AskUserQuestion.
+3. List deployments: `514 agent deployment list --project <PROJECT> --json`.
+   Identify the active production deployment. Capture **deployment ID** and **branch name**. Carry a blocker if ambiguous.
+4. List tables: `514 agent table list <DEPLOY_ID> --project <PROJECT> --json`.
+5. Capture DDL for each table (**prompt user first**):
+   `514 clickhouse query 'SHOW CREATE TABLE <DB>.<TABLE>' --project <PROJECT> --branch <BRANCH> --json`
+   Store as `BASELINE_DDL`.
+6. Summarize findings (user, org, project, deployment, branch, tables) and confirm before proceeding.
 
 ---
 
 ## Stage 2 — PROFILE
 
-Goal: Collect schema, query, and storage data. Extract a benchmark query set. Produce an optimization plan that flags re-seed impacts.
+Goal: Collect schema, query, and storage evidence. Extract a benchmark query set. Map findings back to code.
 
 ### 2a. Fetch schema metadata
 
@@ -133,54 +95,31 @@ Goal: Collect schema, query, and storage data. Extract a benchmark query set. Pr
 514 agent sql-resource list <DEPLOY_ID> --project <PROJECT> --json
 ```
 
-### 2b. Collect slow queries (guardrailed)
+### 2b. Collect slow queries
 
 ```
 514 agent metrics query --project <PROJECT> --branch <BRANCH> --duration-min 100 --sort-by query_duration_ms --sort-dir desc --limit 10 --json
 ```
 
-### 2c. Collect storage and column diagnostics (raw — prompt user)
+### 2c. Collect storage and column diagnostics (prompt user)
 
-Batch these together and **prompt the user once** showing all diagnostic SQL before running:
-
-**Part sizes** — storage footprint per table and partition:
-
-```
-514 clickhouse query 'SELECT database, table, partition, sum(rows) AS total_rows, formatReadableSize(sum(bytes_on_disk)) AS disk_size, count() AS part_count FROM system.parts WHERE active = 1 AND database NOT IN ('\''system'\'', '\''INFORMATION_SCHEMA'\'', '\''information_schema'\'') GROUP BY database, table, partition ORDER BY sum(bytes_on_disk) DESC LIMIT 20' --project <PROJECT> --branch <BRANCH> --json
-```
-
-**Column cardinality** — candidates for `LowCardinality`:
-
-```
-514 clickhouse query 'SELECT database, table, name AS column, type FROM system.columns WHERE database NOT IN ('\''system'\'', '\''INFORMATION_SCHEMA'\'', '\''information_schema'\'') AND type LIKE '\''%String%'\'' ORDER BY database, table, name' --project <PROJECT> --branch <BRANCH> --json
-```
+Read [references/diagnostic-sql.md](references/diagnostic-sql.md) for the exact SQL templates. Batch the part-size and column-cardinality queries into a single approval prompt.
 
 ### 2d. Extract benchmark query set
 
-From the `514 agent metrics query` output (step 2b), extract the SQL text of the top 5–10 slow queries. Deduplicate by query template (ignore literal differences). Store as `BENCHMARK_QUERIES`.
+From step 2b output, extract the top 5–10 slow queries. Deduplicate by template. Store as `BENCHMARK_QUERIES`. Note which tables each query reads from — these become `BENCHMARK_TABLES`.
 
-For each benchmark query, note which tables it reads from. This determines which tables need data on the preview branch later.
-
-### 2e. Capture baseline EXPLAIN plans (raw — prompt user)
-
-**Prompt the user once** showing all EXPLAIN queries before executing:
+### 2e. Capture baseline EXPLAIN plans (prompt user)
 
 ```
 514 clickhouse query 'EXPLAIN indexes = 1 <QUERY_SQL>' --project <PROJECT> --branch <BRANCH> --json
 ```
 
-Run one per benchmark query. Store results as `BASELINE_EXPLAINS`.
+One per benchmark query. Store as `BASELINE_EXPLAINS`.
 
-### 2f. Run baseline benchmarks (raw — prompt user)
+### 2f. Run baseline benchmarks (prompt user)
 
-**Prompt the user** showing the benchmark query set and explain that each will be run 3× on production (1 warmup + 2 timed) via `514 clickhouse query`.
-
-For each benchmark query:
-
-1. Warmup: run once via `514 clickhouse query` (discard timing)
-2. Timed: run 2× via `514 clickhouse query`
-
-Then collect results via the guardrailed metrics command:
+Run each benchmark query 3× on production (1 warmup + 2 timed) via `514 clickhouse query`. Then collect results:
 
 ```
 514 agent metrics query --project <PROJECT> --branch <BRANCH> --search "<query_pattern>" --sort-by query_duration_ms --sort-dir desc --limit 10 --json
@@ -190,291 +129,168 @@ Store as `BASELINE_METRICS`.
 
 ### 2g. Analyze against best practices
 
-Read the rules in `skills/clickhouse/best-practices/rules/` (or `AGENTS.md` for the compiled guide) and evaluate each applicable rule against the collected schema and metrics data. Pay particular attention to rules tagged with schema design and query optimization.
+Read `skills/clickhouse/best-practices/rules/` (or `AGENTS.md`). Evaluate each applicable rule against collected evidence.
 
-Additionally, explicitly check each slow query for materialized view opportunities:
+Additionally, check each slow query for MV opportunities:
 
-- **Aggregation pattern:** Does the query contain `GROUP BY` over a table with high `read_rows` (millions+)? If the aggregation uses functions that support `-State`/`-Merge` (`count`, `uniq`, `sum`, `avg`, `min`, `max`, `quantile`), flag as an incremental MV candidate.
-- **Join pattern:** Does the query join multiple tables where dimension tables change infrequently? If staleness of a few minutes is acceptable, flag as a refreshable MV candidate.
-- **Frequency:** Is the same query template executed many times per hour? High frequency amplifies the benefit of pre-computation.
+- **Aggregation pattern:** `GROUP BY` with high `read_rows` and `-State`/`-Merge`-compatible functions → incremental MV candidate
+- **Join pattern:** Joins with infrequently-changing dimension tables and acceptable staleness → refreshable MV candidate
+- **Frequency:** Same template executed many times per hour → pre-computation benefit amplified
 
-Consult the `query-mv-when-to-add` rule for the full decision matrix. If a query matches an MV pattern, carry it forward as a candidate alongside schema and index candidates.
+Consult `query-mv-when-to-add` for the full decision matrix.
 
 ### 2h. Map findings back to code
 
-Read the local Moose codebase to connect profiling evidence to the actual source files. This step covers two things:
+Scan the local Moose codebase for data model definitions (`app/` or `datamodels/`) and query entrypoints (`defineQueryModel`, SQL template literals, query-builder functions).
 
-**Discover data models:** Scan for data model definitions (typically under `app/` or `datamodels/`). For each table surfaced during profiling, locate the model file that defines it.
-
-**Discover query entrypoints:** For each benchmark query from step 2d, find where the query pattern originates in the codebase. Look for one of:
-
-- an existing `defineQueryModel` export that represents the query shape
-- an exported SQL template literal or query-builder function
-- another codified application query/API entrypoint that faithfully represents the query shape
-- if no codified entrypoint exists, note that a query model will need to be created during baseline setup
-
-For each likely improvement, capture:
-
-- affected tables and their model file paths
-- query patterns helped and their query entrypoint paths
-- likely schema or model change
-- whether the change is destructive (ORDER BY / engine change = table recreated, seeded data lost)
-- whether the improvement requires creating a new MV + target table (new files, not modifications to existing code; note backfill as a post-deployment action)
-- the benchmark target interface to use (see benchmark contract above)
+For each candidate improvement, capture: affected tables + model paths, query entrypoint paths, likely change, whether destructive (ORDER BY / engine change), whether it requires a new MV + target table, and the benchmark target interface.
 
 ---
 
 ## Stage 3 — PROPOSE
 
-Goal: Present optimization candidates for approval.
+Use AskUserQuestion to present a numbered optimization plan. Per candidate:
 
-Use AskUserQuestion to present a numbered optimization plan. For each candidate include:
-
-- candidate name
-- expected impact (`high`, `medium`, `low`)
-- affected tables
-- local query or model paths to change
-- re-seed category:
-  - **Type-only** (e.g., String → LowCardinality): ALTER COLUMN, data preserved
-  - **ORDER BY / engine changes**: table recreated, seeded data lost → manual re-seed needed
-  - **New MVs**: only populate from new inserts, need manual backfill
+- candidate name, expected impact (`high` / `medium` / `low`)
+- affected tables, local paths to change
+- re-seed category: **Type-only** (data preserved) · **ORDER BY / engine** (table recreated, reseed needed) · **New MV** (needs backfill)
 - risks or caveats
 
-Let the user accept, modify, or reject items. Capture the approved candidate set before proceeding.
+Let the user accept, modify, or reject items. Capture the approved set.
 
 ---
 
 ## Stage 4 — BASELINE
 
-Goal: Create the frozen control branch, add benchmark scaffold, ensure comparable seed data, and prove the benchmark runs on baseline.
+Goal: Create the frozen control branch, scaffold benchmarks, seed comparable data, prove the benchmark runs.
 
 ### 4a. Scaffold the benchmark harness
-
-Run the benchmark scaffold unless it already exists:
 
 ```bash
 moose add benchmark
 ```
 
-Do not hand-write benchmark infrastructure when the scaffold exists.
-
-After running the scaffold:
-
-- inspect the generated benchmark files and directories
-- identify the scaffold's documented entrypoints, config files, and extension points
-- treat generated harness files as read-only unless the scaffold explicitly expects edits
-- if the scaffold shape differs from assumptions, adapt to the generated structure
+Inspect the generated files. Treat harness files as read-only unless the scaffold explicitly expects edits.
 
 ### 4b. Wire the benchmark target interface
 
-Use the benchmark target interface discovered in step 2h. If no codified query entrypoint was found during profiling, define a query model now that matches the discovered production query pattern.
+Use the interface discovered in 2h. Fill the scaffold's query definition entrypoint with the correct import, call shape, and parameters.
 
-Fill the scaffold's benchmark query definition entrypoint with:
-
-- the correct workspace package import
-- the benchmark target interface import identified in step 2h
-- the call shape, base filters, and parameters needed to exercise the real query/API under test
-
-### 4c. Create and push the frozen baseline branch
+### 4c. Create and push the baseline branch
 
 ```bash
 git checkout -b perf/baseline
-git add -A
-git commit -m "perf: add benchmark scaffold and target interface"
+git add -A && git commit -m "perf: add benchmark scaffold and target interface"
 git push -u origin perf/baseline
 ```
 
-### 4d. Wait for baseline deployment and resolve the baseline DB
+### 4d. Wait for deployment and export credentials
 
-```
-514 agent deployment list --project <PROJECT> --json
-```
+Poll `514 agent deployment list --project <PROJECT> --json` until the baseline deployment appears.
 
-Poll until the baseline deployment appears. Resolve the baseline DB name.
+Follow [references/credentials.md](references/credentials.md) to export the baseline branch's ClickHouse credentials into `.env.preview`. Carry a blocker if credentials cannot be resolved.
 
 ### 4e. Ensure baseline has comparable seed data
 
-Check row counts on the baseline deployment. **Prompt the user** before running:
+Resolve `BENCHMARK_TABLES` from Stage 2d.
+
+**Comparable seed data** means: the same tables exist on baseline and every candidate, the seeded slice exercises the profiled query shape, and the same seed strategy is reused everywhere.
+
+Check row counts (see [references/diagnostic-sql.md](references/diagnostic-sql.md) for the template). Store as `BASELINE_SEED_COUNTS`.
+
+If data is insufficient, compute `SAMPLE_SIZES` from production row counts using the **Sample sizing** table. Present the seeding plan via AskUserQuestion (table, prod rows, sample size, effective %, limit). Store the chosen strategy as `BASELINE_SEED_NOTES`.
+
+Seed preference order: (1) reuse a filter window from the profiled query, (2) deterministic `--where` filter, (3) `LIMIT` as a last resort with a noted caveat.
+
+`514 clickhouse seed` appends and has no truncate step. Carry a blocker if a reseed would produce duplicates.
 
 ```
-514 clickhouse query 'SELECT table, sum(rows) AS total_rows FROM system.parts WHERE active = 1 AND database NOT IN ('\''system'\'','\''INFORMATION_SCHEMA'\'','\''information_schema'\'') GROUP BY table' --project <PROJECT> --branch perf/baseline --json
+514 clickhouse seed <TABLE> --project <PROJECT> --branch perf/baseline --from <BRANCH> --where "<FILTER>" --limit <SAMPLE_SIZE> --json
 ```
 
-If tables that the benchmark queries read from have insufficient data, compute sample sizes and re-seed from production.
+After seeding, re-check row counts and update `BASELINE_SEED_COUNTS`. Carry a blocker if counts are still insufficient.
 
-**Compute sample sizes.** Query production row counts for each table the benchmark reads from:
+### 4f. Prove the benchmark runs
 
-```
-514 clickhouse query 'SELECT table, sum(rows) AS total_rows FROM system.parts WHERE active = 1 AND database = '\''<PROD_DB>'\'' GROUP BY table ORDER BY total_rows DESC' --project <PROJECT> --branch <PROD_BRANCH> --json
-```
-
-Apply the tiering table from the **Sample sizing** section to compute a LIMIT per table.
-
-**Present the seeding plan.** Use AskUserQuestion to show the user a summary table before executing:
-
-| Table | Prod rows | Sample size | Effective % | LIMIT clause |
-| ----- | --------- | ----------- | ----------- | ------------ |
-| ... | ... | ... | ... | ... |
-
-Let the user adjust any value. Store the final sizes as `SAMPLE_SIZES`.
-
-**Execute the seed.** For each table, run the INSERT (with no LIMIT for tables under 100K). **Prompt the user** showing each INSERT statement:
-
-```
-514 clickhouse query 'INSERT INTO <BASELINE_DB>.<TABLE> SELECT * FROM <PROD_DB>.<TABLE> LIMIT <SAMPLE_SIZE>' --project <PROJECT> --branch perf/baseline --json
-```
-
-Preview and production share the same ClickHouse cluster — this cross-database pattern is the standard seeding mechanism.
-
-### 4f. Prove the benchmark runs on baseline
-
-Run the benchmark suite against the baseline DB:
+Verify all artifacts exist: `BENCHMARK_TABLES`, `.env.preview`, `SAMPLE_SIZES`, `BASELINE_SEED_COUNTS`, `BASELINE_SEED_NOTES`. Carry a blocker if any are missing.
 
 ```bash
-MOOSE_CLICKHOUSE_CONFIG__DB_NAME=<BASELINE_DB> pnpm test:perf
+pnpm test:perf
 ```
 
-Capture the baseline report path under `reports/`. If the benchmark fails, stop and fix before creating candidate branches.
-
-Artifacts from this stage:
-
-- `BASELINE_BRANCH=perf/baseline`
-- `BASELINE_DB`
-- baseline benchmark report under `reports/`
+Capture the report path under `reports/`. If the benchmark fails or produces no report, stop and fix before proceeding.
 
 ---
 
 ## Stage 5 — EXPERIMENT
 
-Goal: For each approved candidate, implement the optimization, deploy, seed, and benchmark — completing the full candidate lifecycle before moving to comparison.
+Goal: For each approved candidate, implement, deploy, seed from baseline, and benchmark.
 
 ### Parallelization
 
-Run candidates in parallel when possible. Each candidate should run in its own git worktree so sub-agents can work simultaneously without branch conflicts.
+Run candidates in parallel via git worktrees. **Coordinator** creates worktrees from `perf/baseline` and dispatches one sub-agent per candidate. Each sub-agent returns:
 
-**Coordinator** owns:
-- creating worktrees from the frozen baseline
-- dispatching one sub-agent per candidate
-- collecting results after all sub-agents complete
-
-**Each sub-agent** owns one candidate in its own worktree and returns:
-- `candidate_name`
-- `candidate_branch`
-- `candidate_db`
-- `report_path` (absolute path to the benchmark report JSON)
-- `status` (`success` or `blocked`)
-- `failure_reason` (if blocked)
+`candidate_name`, `candidate_branch`, `candidate_seed_counts`, `candidate_explains`, `candidate_verification_notes`, `report_path`, `status` (`success` | `blocked`), `failure_reason`
 
 ### Per-candidate workflow
 
-Each sub-agent runs the following steps in its worktree:
-
-1. Branch from baseline:
-
-   ```bash
-   git checkout perf/baseline
-   git checkout -b perf/candidate-<name>
-   ```
-
-2. Apply exactly one optimization strategy by editing the Moose data model files, SQL resources, or materialized view definitions.
-
-3. If the change is destructive (ORDER BY / engine change), create a new data model that produces a separate table with the optimized schema (e.g., `<Model>Optimized` → `<table>_optimized`). Keep the original model and table untouched — `moose dev` and the preview deployment will create the new table automatically.
-
-4. Update the benchmark target interface so only the minimal target change is introduced — usually the `table` reference that points at the new optimized table (e.g., `<table>_optimized`).
-
-5. Validate locally:
-
-   ```bash
-   moose dev --timestamps
-   ```
-
-6. Commit and push:
-
-   ```bash
-   git add -A
-   git commit -m "perf: candidate <name>"
-   git push -u origin perf/candidate-<name>
-   ```
-
-7. Wait for the candidate deployment and resolve the candidate DB name.
-
-8. Check row counts and re-seed if needed. Reuse the `SAMPLE_SIZES` from Stage 4e to ensure baseline and candidates have comparable data volumes. For tables that lost data due to destructive changes, re-seed from production using the same LIMIT values. Re-query production row counts only if the candidate introduced new tables not present in the baseline.
-
-   If column types changed between baseline and candidate, compare `system.columns` between the two databases and construct an explicit column list with CAST expressions. **Show the user the cast mapping** before executing.
-
-9. After re-seeding, poll part counts to confirm data has settled:
-
-   ```
-   514 clickhouse query 'SELECT table, count() AS parts FROM system.parts WHERE active = 1 AND database NOT IN ('\''system'\'','\''INFORMATION_SCHEMA'\'','\''information_schema'\'') GROUP BY table ORDER BY parts DESC' --project <PROJECT> --branch perf/candidate-<name> --json
-   ```
-
-   **Prompt the user** before running. If part counts are high, wait briefly and re-check.
-
-10. Run the benchmark suite against the candidate DB:
-
-    ```bash
-    MOOSE_CLICKHOUSE_CONFIG__DB_NAME=<CANDIDATE_DB> pnpm test:perf
-    ```
-
-11. Return the report path and status to the coordinator.
+1. Branch: `git checkout perf/baseline && git checkout -b perf/candidate-<name>`
+2. Apply exactly one optimization (data models, SQL resources, or MV definitions).
+3. If destructive (ORDER BY / engine change), resolve the new physical table name via Moose versioned-table behavior. Carry a blocker if ambiguous.
+4. Update the benchmark target interface (usually just the `table` reference).
+5. Validate locally: `moose dev --timestamps`
+6. Commit and push: `git add -A && git commit -m "perf: candidate <name>" && git push -u origin perf/candidate-<name>`
+7. Wait for deployment.
+8. **Seed from baseline, not production.** Prompt the user once with the row-count SQL and `514 clickhouse seed` commands.
+   - Copy each `BENCHMARK_TABLES` entry from `perf/baseline`: `514 clickhouse seed <TABLE> --project <PROJECT> --branch perf/candidate-<name> --from perf/baseline --json`
+   - Do not recompute `SAMPLE_SIZES` — candidates inherit baseline's exact data set.
+   - Carry a blocker if column types changed (seed copies `SELECT *`; casts need CLI support) or if a reseed would duplicate rows.
+9. Capture `CANDIDATE_SEED_COUNTS` and compare to `BASELINE_SEED_COUNTS`. Carry a blocker if not comparable.
+10. Capture `CANDIDATE_EXPLAINS` using the same EXPLAIN shape from 2e (**prompt user**).
+11. Re-generate `.env.preview` for the candidate branch per [references/credentials.md](references/credentials.md). Carry a blocker if credentials cannot be resolved.
+12. Run benchmark: `pnpm test:perf` (`.env.preview` already targets this candidate). Carry a blocker if no report.
+13. Record `candidate_verification_notes` (seed strategy, caveats, count comparison, open questions for Stage 6).
+14. Return all artifacts to the coordinator.
 
 ### Coordinator collection
 
-After all sub-agents complete, the coordinator collects:
-- the baseline report path from Stage 4
-- each candidate's report path, branch, DB, and status
-
-If any candidate is blocked, report the failure reason and proceed with the remaining candidates.
+Collect baseline report + `BASELINE_SEED_COUNTS` + `BASELINE_SEED_NOTES` + each candidate's artifacts. Report any blocked candidates and proceed with the rest.
 
 ---
 
 ## Stage 6 — COMPARE
 
-Goal: Compare baseline and candidate benchmark reports and select a winner.
+1. Read baseline and candidate reports.
+2. Verify required evidence exists for each candidate: both report paths, `BASELINE_EXPLAINS` / `CANDIDATE_EXPLAINS`, seed counts, seed notes / verification notes. Carry a blocker if any are missing.
+3. Verify parity per candidate:
+   - **data parity:** comparable tables and row counts
+   - **result parity:** same results (or intentional difference documented and approved)
+   - **SQL parity:** same query shape apart from the optimization
+   - **EXPLAIN parity:** plan changes consistent with the intended optimization
+   Parity failure is separate from regression. A candidate with failed parity is ineligible until fixed or explicitly approved.
+4. Build a ranked comparison table:
 
-1. Read the baseline report and each candidate report using the paths collected by the coordinator.
+   | Metric | Baseline | Candidate A | ... |
+   | ------ | -------- | ----------- | --- |
+   | Duration p50 (ms) | X | Y | ... |
+   | Duration p95 (ms) | X | Y | ... |
+   | Rows read | X | Y | ... |
+   | EXPLAIN: granules | X | Y | ... |
 
-2. For each candidate, verify:
-   - data checksum parity (same data, same results)
-   - SQL parity (same query shape apart from the intended optimization)
-
-3. Build a ranked comparison table across all reports:
-
-   | Metric            | Baseline | Candidate A | Candidate B | ... |
-   | ----------------- | -------- | ----------- | ----------- | --- |
-   | Duration p50 (ms) | X        | Y           | Z           | ... |
-   | Duration p95 (ms) | X        | Y           | Z           | ... |
-   | Rows read         | X        | Y           | Z           | ... |
-   | EXPLAIN: granules | X        | Y           | Z           | ... |
-
-4. Recommend the winning candidate based on the ranked comparison. If any metric regressed, use AskUserQuestion to ask the user how to proceed:
-   - Option A: Fix the issues and re-run the experiment
-   - Option B: Revert specific changes
-   - Option C: Accept and continue to ship
+5. Recommend the winner. If any metric regressed or evidence is missing, use AskUserQuestion: (A) fix and re-run, (B) revert specific changes, (C) accept and ship.
 
 ---
 
 ## Stage 7 — SHIP
 
-Goal: Create a pull request for the winning candidate and route to rollout planning.
-
 1. Checkout the winning candidate branch.
-
-2. Build a PR body that includes:
-   - summary of the optimization applied
-   - benchmark comparison table from Stage 6
-   - EXPLAIN diffs (baseline vs winner)
-   - re-seed notes (which tables were re-seeded and why)
-   - actual sample sizes per table from `SAMPLE_SIZES` (rows seeded, effective % of production), with a caveat that while samples are sized to exercise ClickHouse storage characteristics (granule skipping, partition pruning, merge behavior), full-volume production behavior may still differ
-   - recommendations for monitoring post-merge
-
+2. Build a PR body: optimization summary, comparison table, EXPLAIN diffs, parity summary, re-seed notes, `SAMPLE_SIZES` per table (rows seeded, effective % of production — caveat that full-volume behavior may differ), any approved evidence gaps, monitoring recommendations.
+   Do not create the PR until comparison evidence exists or the user explicitly approves gaps.
 3. Create the PR:
-
    ```bash
    git push -u origin HEAD
    gh pr create --title "perf: <optimization summary>" --body "<generated PR body>"
    ```
-
-4. Report the PR URL to the user.
+4. Report the PR URL.
 
 Production rollout planning belongs to `production-rollout-plan`. This skill stops at the PR.
