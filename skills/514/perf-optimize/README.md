@@ -8,15 +8,17 @@ Unlike rule-based skills, this skill has no rules directory or build system. Cor
 
 The agent runs through seven stages:
 
-| Stage | Goal |
-|-------|------|
-| **SETUP** | Authenticate, identify the target project, find the active deployment, and capture baseline DDL |
-| **PROFILE** | Collect production query, schema, and storage evidence, then map hot query patterns back to code |
-| **PROPOSE** | Present candidate optimizations, benchmark targets, and experiment risk to the user |
-| **BASELINE** | Scaffold the benchmark harness, create the frozen control branch, ensure comparable seed data, and benchmark baseline |
-| **EXPERIMENT** | Create experiment branches, apply approved optimizations, validate locally, seed, and benchmark each candidate |
-| **COMPARE** | Rank baseline vs candidate benchmark results and select a winner |
-| **SHIP** | Create the winning PR with benchmark evidence and route production rollout planning to `production-rollout-plan` |
+
+| Stage          | Goal                                                                                                                                        |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| **SETUP**      | Authenticate, identify the target project, find the active deployment, and capture baseline DDL                                             |
+| **PROFILE**    | Collect production query, schema, and storage evidence, then map hot query patterns back to code                                            |
+| **PROPOSE**    | Present candidate optimizations, benchmark targets, and experiment risk to the user                                                         |
+| **BASELINE**   | Scaffold the benchmark harness, create the frozen control branch, fan out candidate branches immediately, and benchmark the seeded baseline |
+| **EXPERIMENT** | Finish already-started candidate deployments, seed each from baseline, and benchmark each candidate                                         |
+| **COMPARE**    | Rank baseline vs candidate benchmark results and select a winner                                                                            |
+| **SHIP**       | Create the winning PR with benchmark evidence and route production rollout planning to `production-rollout-plan`                            |
+
 
 ## Prerequisites
 
@@ -37,9 +39,10 @@ If a project slug is provided, the agent skips the project selection prompt. Oth
 
 ## Relationship to downstream skills
 
-`perf-optimize` is the end-to-end optimization workflow in this repo. It profiles production, proposes candidate schema changes, benchmarks a frozen baseline against experiment branches, and opens the winning PR.
+`perf-optimize` is the end-to-end optimization workflow in this repo. It profiles production, proposes candidate schema changes, starts baseline and candidate preview deployments in parallel from the local baseline commit, uses `514 agent deployment wait` to monitor those previews, benchmarks the seeded baseline against experiment branches, and opens the winning PR.
 
 Use:
+
 - `production-rollout-plan` when the winning candidate, or any other chosen change, needs a safe path to production
 
 ## Editing

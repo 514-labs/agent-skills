@@ -22,21 +22,24 @@ description: >
 Seven stages, run sequentially: **SETUP → PROFILE → PROPOSE → BASELINE → EXPERIMENT → COMPARE → SHIP**.
 Complete each stage fully before moving to the next. Use conversation context as state.
 
+Inside Stage 4, start the baseline deployment and all approved candidate deployments in parallel. Do not wait for the baseline preview deployment before creating candidate branches from the local `perf/baseline` commit.
+
 If the user provided a project slug as an argument, skip the project selection prompt in Stage 1.
 
 ## Command safety
 
-**Guardrailed (run freely):** `514 agent auth whoami`, `514 agent project list`, `514 agent deployment list`, `514 agent table list`, `514 agent materialized-view list`, `514 agent sql-resource list`, `514 agent metrics query`, `514 logs query`, `moose add benchmark`, `moose dev`, `moose ls`, `pnpm test:perf`
+**Guardrailed (run freely):** `514 agent auth whoami`, `514 agent project list`, `514 agent deployment list`, `514 agent deployment wait`, `514 agent table list`, `514 agent materialized-view list`, `514 agent sql-resource list`, `514 agent metrics query`, `514 logs query`, `514 clickhouse query`, `moose add benchmark`, `moose dev`, `moose ls`, `pnpm env:preview`, `pnpm bench`
 
 **Require user approval before running:**
 
 - `514 env list --platform --dotenv` — emits platform secrets; pipe directly to `.env.*`, not for inspection
-- Any `514 clickhouse query` — including `SHOW CREATE TABLE`, `system.parts`, `EXPLAIN`, benchmark replay
 - Any `514 clickhouse seed` — copies rows from a source branch into a preview branch
 
-Use AskUserQuestion to show the exact command or fully-resolved SQL and get explicit approval. Never show a template with unresolved placeholders.
+Use AskUserQuestion to show the exact command and get explicit approval for approval-gated commands. Never show a template with unresolved placeholders.
 
 **Ambiguity rule:** If deployment, database, or table resolution is ambiguous at any point, stop and carry a blocker instead of guessing. This rule applies throughout all stages — later stages reference it as "carry a blocker" without repeating the full rationale.
+
+**Deployment wait rule:** When waiting for a preview deployment, use `514 agent deployment wait` for the target branch. Do not write custom Python scripts, Bash loops, or other ad hoc polling wrappers around `514 agent deployment list`.
 
 ## Benchmark contract
 
@@ -162,19 +165,70 @@ Let the user accept, modify, or reject items. Capture the approved set.
 
 ## Stage 4 — BASELINE
 
-Goal: Create the frozen control branch, scaffold benchmarks, seed comparable data, prove the benchmark runs.
+Goal: Create the frozen control branch, fan out candidate branches immediately, seed comparable baseline data, prove the benchmark runs.
 
 ### 4a. Scaffold the benchmark harness
 
+Run this from the Moose project root. The benchmark package should be created as a sibling directory next to the Moose project, not from inside some other working directory.
+
 ```bash
-moose add benchmark
+mkdir ../query-benchmarks && moose add benchmark --dir ../query-benchmarks
 ```
 
-Inspect the generated files. Treat harness files as read-only unless the scaffold explicitly expects edits.
+Inspect the generated files immediately after scaffolding. Treat harness files as read-only unless the scaffold explicitly expects edits.
+
+### 4a.1. Install the Moose project as a workspace dependency in the benchmark package
+
+The benchmark package must import the Moose project through the workspace package graph, not through copied code or ad hoc relative filesystem imports.
+
+1. Read the Moose project's `package.json` and capture its real package name from the `name` field.
+2. In the benchmark `package.json`, add the Moose project to `dependencies` by its actual package name using the workspace protocol:
+
+   ```json
+   {
+     "dependencies": {
+       "<moose-package-name>": "workspace:*"
+     }
+   }
+   ```
+
+3. If the benchmark package already references the Moose project with a non-workspace version, replace it with `workspace:*`.
+4. If the benchmark package uses a relative `file:` dependency, replace it with `workspace:*`.
+5. Run the package manager install from the workspace root so the workspace link is actually created.
+6. Verify the benchmark code imports the Moose project by package name, not by relative path traversal.
+
+Required checks:
+- the Moose project and the benchmark package must both live in the same workspace
+- the Moose project must have a stable `name` field in its `package.json`
+- the benchmark package must depend on that exact package name
+- the workspace install must complete before running `pnpm bench`
+
+Do not:
+- do not use `../..` relative imports from the benchmark package into the Moose app
+- do not copy query code into the benchmark package just to avoid dependency setup
+- do not invent a package name if the Moose project does not already declare one
+- do not use custom linking scripts when the workspace dependency mechanism can express the relationship
+
+If the Moose project is not already part of the workspace, or if its package name is missing or ambiguous, carry a blocker instead of guessing.
 
 ### 4b. Wire the benchmark target interface
 
-Use the interface discovered in 2h. Fill the scaffold's query definition entrypoint with the correct import, call shape, and parameters.
+From the Moose project root, edit the benchmark entrypoint inside the sibling `../query-benchmarks` package. Use the interface discovered in 2h and fill the scaffold's query definition entrypoint with the correct import, call shape, and parameters.
+
+Import the target benchmark query into `query-benchmarks` from the Moose workspace dependency you just installed. Prefer:
+- package import from the Moose workspace package name declared in the Moose project's `package.json`
+
+Example shape:
+
+```typescript
+import { targetBenchmarkQuery } from "<moose-package-name>";
+```
+
+Adapt the example to the real query entrypoint discovered in Stage 2h. Keep the benchmark target semantically identical to production.
+
+Avoid:
+- relative imports that escape the benchmark package
+- duplicated benchmark-only copies of the production query logic
 
 ### 4c. Create and push the baseline branch
 
@@ -184,13 +238,38 @@ git add -A && git commit -m "perf: add benchmark scaffold and target interface"
 git push -u origin perf/baseline
 ```
 
-### 4d. Wait for deployment and export credentials
+### 4d. Fan out candidate branches immediately
 
-Poll `514 agent deployment list --project <PROJECT> --json` until the baseline deployment appears.
+As soon as the baseline commit exists locally, create one worktree per approved candidate from that local `perf/baseline` commit and dispatch one sub-agent per candidate. Do this **before** waiting for any preview deployment.
 
-Follow [references/credentials.md](references/credentials.md) to export the baseline branch's ClickHouse credentials into `.env.preview`. Carry a blocker if credentials cannot be resolved.
+Example branch creation:
 
-### 4e. Ensure baseline has comparable seed data
+```bash
+git worktree add ../candidate-<name> -b perf/candidate-<name> perf/baseline
+```
+
+Each candidate sub-agent should:
+
+1. start from the local `perf/baseline` commit, not from a deployed preview
+2. apply exactly one approved optimization
+3. if destructive (ORDER BY / engine change), resolve the new physical table name via Moose versioned-table behavior; carry a blocker if ambiguous
+4. update the benchmark target interface (usually just the `table` reference)
+5. validate locally: `moose dev --timestamps`
+6. commit and push immediately: `git add -A && git commit -m "perf: candidate <name>" && git push -u origin perf/candidate-<name>`
+
+Return at least: `candidate_name`, `candidate_branch`, `status` (`pushed` | `blocked`), `failure_reason`, `candidate_verification_notes`.
+
+### 4e. Wait for baseline deployment and export credentials
+
+Use the built-in wait command for the baseline branch:
+
+```bash
+514 agent deployment wait --branch perf/baseline
+```
+
+Do not replace this with a custom script or repeated manual polling of `514 agent deployment list`.
+
+### 4f. Ensure baseline has comparable seed data
 
 Resolve `BENCHMARK_TABLES` from Stage 2d.
 
@@ -210,12 +289,19 @@ Seed preference order: (1) reuse a filter window from the profiled query, (2) de
 
 After seeding, re-check row counts and update `BASELINE_SEED_COUNTS`. Carry a blocker if counts are still insufficient.
 
-### 4f. Prove the benchmark runs
+### 4g. Prove the benchmark runs
 
-Verify all artifacts exist: `BENCHMARK_TABLES`, `.env.preview`, `SAMPLE_SIZES`, `BASELINE_SEED_COUNTS`, `BASELINE_SEED_NOTES`. Carry a blocker if any are missing.
+Verify the pre-run artifacts exist: `BENCHMARK_TABLES`, `SAMPLE_SIZES`, `BASELINE_SEED_COUNTS`, `BASELINE_SEED_NOTES`. Carry a blocker if any are missing.
+
+Be explicit about the baseline run:
+
+1. Make sure the current checkout is the baseline branch before running any benchmark scripts.
+2. Rebuild `.env.preview` using the latest helper script for the currently checked out branch. Carry a blocker if `.env.preview` is still missing after this step.
+3. Run the benchmark with the current benchmark script.
 
 ```bash
-pnpm test:perf
+git checkout perf/baseline
+pnpm env:preview && pnpm bench
 ```
 
 Capture the report path under `reports/`. If the benchmark fails or produces no report, stop and fix before proceeding.
@@ -224,33 +310,41 @@ Capture the report path under `reports/`. If the benchmark fails or produces no 
 
 ## Stage 5 — EXPERIMENT
 
-Goal: For each approved candidate, implement, deploy, seed from baseline, and benchmark.
+Goal: For each approved candidate already pushed from the local baseline commit, wait for deployment as needed, seed from baseline, and benchmark.
 
 ### Parallelization
 
-Run candidates in parallel via git worktrees. **Coordinator** creates worktrees from `perf/baseline` and dispatches one sub-agent per candidate. Each sub-agent returns:
+Run candidates in parallel via git worktrees. **Coordinator** should have already created and pushed candidate branches in Stage 4d so their preview deployments can start while baseline deploys and seeds. Resume or re-dispatch one sub-agent per pushed candidate after `BASELINE_SEED_COUNTS` and `BASELINE_SEED_NOTES` exist. Each sub-agent returns:
 
 `candidate_name`, `candidate_branch`, `candidate_seed_counts`, `candidate_explains`, `candidate_verification_notes`, `report_path`, `status` (`success` | `blocked`), `failure_reason`
 
 ### Per-candidate workflow
 
-1. Branch: `git checkout perf/baseline && git checkout -b perf/candidate-<name>`
-2. Apply exactly one optimization (data models, SQL resources, or MV definitions).
-3. If destructive (ORDER BY / engine change), resolve the new physical table name via Moose versioned-table behavior. Carry a blocker if ambiguous.
-4. Update the benchmark target interface (usually just the `table` reference).
-5. Validate locally: `moose dev --timestamps`
-6. Commit and push: `git add -A && git commit -m "perf: candidate <name>" && git push -u origin perf/candidate-<name>`
-7. Wait for deployment.
-8. **Seed from baseline, not production.** Prompt the user once with the row-count SQL and `514 clickhouse seed` commands.
+1. Confirm the candidate branch was created from the local `perf/baseline` commit and pushed in Stage 4d. If not, carry a blocker instead of recreating it from a later baseline state.
+2. Wait for the candidate deployment with the built-in wait command:
+
+   ```bash
+   514 agent deployment wait --project <PROJECT> --branch perf/candidate-<name>
+   ```
+
+   Do not replace this with a custom script or repeated manual polling of `514 agent deployment list`.
+3. **Seed from baseline, not production.** Prompt the user once with the row-count SQL and `514 clickhouse seed` commands.
    - Copy each `BENCHMARK_TABLES` entry from `perf/baseline`: `514 clickhouse seed <TABLE> --project <PROJECT> --branch perf/candidate-<name> --from perf/baseline --json`
    - Do not recompute `SAMPLE_SIZES` — candidates inherit baseline's exact data set.
    - Carry a blocker if column types changed (seed copies `SELECT *`; casts need CLI support) or if a reseed would duplicate rows.
-9. Capture `CANDIDATE_SEED_COUNTS` and compare to `BASELINE_SEED_COUNTS`. Carry a blocker if not comparable.
-10. Capture `CANDIDATE_EXPLAINS` using the same EXPLAIN shape from 2e (**prompt user**).
-11. Re-generate `.env.preview` for the candidate branch per [references/credentials.md](references/credentials.md). Carry a blocker if credentials cannot be resolved.
-12. Run benchmark: `pnpm test:perf` (`.env.preview` already targets this candidate). Carry a blocker if no report.
-13. Record `candidate_verification_notes` (seed strategy, caveats, count comparison, open questions for Stage 6).
-14. Return all artifacts to the coordinator.
+4. Capture `CANDIDATE_SEED_COUNTS` and compare to `BASELINE_SEED_COUNTS`. Carry a blocker if not comparable.
+5. Capture `CANDIDATE_EXPLAINS` using the same EXPLAIN shape from 2e (**prompt user**).
+6. Make sure the current checkout is the candidate branch, then re-generate `.env.preview` with the latest helper script so it targets that checked out branch. Carry a blocker if credentials cannot be resolved.
+7. Run benchmark with the current benchmark script:
+
+   ```bash
+   git checkout perf/candidate-<name>
+   pnpm env:preview && pnpm bench
+   ```
+
+   Carry a blocker if no report.
+8. Record `candidate_verification_notes` (seed strategy, caveats, count comparison, open questions for Stage 6).
+9. Return all artifacts to the coordinator.
 
 ### Coordinator collection
 
