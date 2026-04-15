@@ -7,7 +7,7 @@ This file provides guidance to AI coding agents (Claude Code, Cursor, Copilot, e
 A collection of skills for AI agents working with MooseStack applications and ClickHouse databases. The repo contains two types of skills:
 
 - **Reference skills** — rule-based collections with a build pipeline that generates compiled documentation (e.g., `clickhouse-best-practices`)
-- **Workflow skills** — single-file `SKILL.md` guides that drive an agent through a multi-stage process (e.g., `perf-optimize`)
+- **Workflow skills** — single-file `SKILL.md` guides that drive an agent through a multi-stage process (e.g., `perf-optimize`, `use-moose`)
 
 > Forked from [ClickHouse/agent-skills](https://github.com/ClickHouse/agent-skills) with MooseStack examples added.
 
@@ -25,6 +25,10 @@ agent-skills/
 │   │   │   ├── SKILL.md             # Debugging guide (5 sections)
 │   │   │   ├── metadata.json        # Version, organization, abstract
 │   │   │   └── README.md            # Maintainer guide
+│   │   ├── use-moose/               # Workflow skill: new analytics agent from typescript-agent template
+│   │   │   ├── SKILL.md
+│   │   │   ├── metadata.json
+│   │   │   └── README.md
 │   │   └── perf-optimize/           # Workflow skill: guided perf optimization
 │   │       ├── SKILL.md             # Complete workflow (5 stages)
 │   │       ├── metadata.json        # Version, organization, abstract
@@ -95,7 +99,7 @@ skills/
       README.md             # Maintainer guide
 ```
 
-Workflow skills have no `rules/` directory, no build step, and no generated `AGENTS.md`. Edit `SKILL.md` directly. See `skills/514/perf-optimize/` for an example.
+Workflow skills have no `rules/` directory, no build step, and no generated `AGENTS.md`. Edit `SKILL.md` directly. See `skills/514/perf-optimize/` and `skills/514/use-moose/` for examples.
 
 ### Naming Conventions
 

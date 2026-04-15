@@ -7,7 +7,7 @@ This file provides guidance to AI coding agents working with this repository.
 This is an **Agent Skills** repository providing expertise for building data applications with [MooseStack](https://docs.fiveonefour.com/moosestack) and ClickHouse. It contains two types of skills:
 
 - **Reference skills** — rule-based collections with a build pipeline (e.g., `clickhouse-best-practices`)
-- **Workflow skills** — single-file guides that drive an agent through a multi-stage process (e.g., `perf-optimize`)
+- **Workflow skills** — single-file guides that drive an agent through a multi-stage process (e.g., `perf-optimize`, `use-moose`)
 
 > Forked from [ClickHouse/agent-skills](https://github.com/ClickHouse/agent-skills) with MooseStack TypeScript and Python examples added to every rule.
 
@@ -24,6 +24,10 @@ agent-skills/
 │   │   │   ├── metadata.json
 │   │   │   └── README.md
 │   │   ├── debug/                    # Workflow skill: deployment debugging (5 sections)
+│   │   │   ├── SKILL.md
+│   │   │   ├── metadata.json
+│   │   │   └── README.md
+│   │   ├── use-moose/                # Workflow skill: analytics agent from typescript-agent template
 │   │   │   ├── SKILL.md
 │   │   │   ├── metadata.json
 │   │   │   └── README.md
@@ -270,6 +274,6 @@ Edit manually - this is the quick reference that agents see first. Keep it under
 
 ## Workflow Skills
 
-The `perf-optimize`, `514-cli`, and `514-debug` skills are **workflow skills** — single `SKILL.md` files that guide an agent through a multi-stage process. They have no `rules/` directory, no build step, and no generated `AGENTS.md`.
+The `perf-optimize`, `use-moose`, `514-cli`, and `514-debug` skills are **workflow skills** — single `SKILL.md` files that guide an agent through a multi-stage process. They have no `rules/` directory, no build step, and no generated `AGENTS.md`.
 
 To edit them, modify the corresponding `SKILL.md` directly (e.g., `skills/514/debug/SKILL.md`). No regeneration or validation commands are needed.

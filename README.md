@@ -17,6 +17,7 @@ Works with Claude Code, Cursor, Copilot, Windsurf, Gemini CLI, Codex, and [20+ o
 | [`clickhouse-best-practices`](./skills/clickhouse/best-practices/) | Reference (28 rules) | Schema design, query optimization, and data ingestion best practices — ClickHouse SQL + MooseStack TypeScript & Python |
 | [`514-cli`](./skills/514/cli/) | Workflow | 514 CLI basics — logging in, linking a project, checking deployments, browsing docs |
 | [`514-debug`](./skills/514/debug/) | Workflow | Deployment debugging — status checks, log tailing, slow query discovery, resource inspection, diagnostic SQL |
+| [`use-moose`](./skills/514/use-moose/) | Workflow | New analytics-agent project only — `moose harness init` with `typescript-agent` template + template Quickstart; open-ended “build an analytics agent” greenfield |
 | [`perf-optimize`](./skills/514/perf-optimize/) | Workflow (7 stages) | End-to-end optimization and benchmarking: profile production, propose candidates, benchmark a frozen baseline vs experiment branches, compare results, and ship the winning PR |
 | [`production-rollout-plan`](./skills/514/production-rollout-plan/) | Workflow (5 stages) | Production rollout planning: classify a chosen change, define rollout/validation/rollback steps, and review a safe path to production |
 

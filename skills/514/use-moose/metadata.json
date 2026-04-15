@@ -1,0 +1,10 @@
+{
+  "version": "0.1.0",
+  "organization": "514 Labs",
+  "date": "April 2026",
+  "abstract": "Minimal workflow: from an open-ended analytics-agent idea to a new local Moose project scaffolded with moose harness init --template typescript-agent and running per the template Quickstart. Does not cover customization beyond Quickstart.",
+  "references": [
+    "https://docs.fiveonefour.com/guides/production-ready-analytics-agent/tutorial",
+    "https://github.com/514-labs/moosestack/tree/main/templates/typescript-agent"
+  ]
+}
