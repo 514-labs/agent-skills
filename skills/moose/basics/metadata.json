@@ -1,0 +1,9 @@
+{
+  "version": "0.1.0",
+  "organization": "514 Labs",
+  "date": "April 2026",
+  "abstract": "How to use MooseStack locally — what `moose dev` runs, reading logs, introspecting via MCP/`moose ls`/`moose query`, defining ingest pipelines, APIs, and materialized views, and recovering from a broken dev state.",
+  "references": [
+    "https://docs.fiveonefour.com/moose"
+  ]
+}

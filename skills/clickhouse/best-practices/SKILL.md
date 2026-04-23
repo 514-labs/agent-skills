@@ -1,6 +1,6 @@
 ---
 name: clickhouse-best-practices-ts-py
-description: MUST USE when reviewing MooseStack data models, ClickHouse schemas, queries, or configurations. Contains 28 rules with MooseStack TypeScript/Python examples. Always read relevant rule files and cite specific rules in responses.
+description: Use when designing, implementing, reviewing, or optimizing MooseStack data models, ClickHouse schemas, queries, indexes, materialized views, or ingestion configs — including during greenfield authoring when schema-design or performance choices need guidance. When invoked, pick the 1-2 rules directly relevant to the immediate decision and apply them inline while you continue to write code. Do NOT pause to read six rule files and emit a "Rules Checked / Findings" audit template unless the user explicitly asks for a formal review or audit.
 license: Apache-2.0
 metadata:
   author: 514 Labs (forked from ClickHouse Inc)
@@ -16,20 +16,30 @@ ClickHouse data modeling best practices extended with MooseStack TypeScript and 
 
 ## IMPORTANT: How to Apply This Skill
 
-**Before answering MooseStack/ClickHouse questions, follow this priority order:**
+**Two modes — pick the right one for the situation:**
 
-1. **Check for applicable rules** in the `rules/` directory
-2. **If rules exist:** Apply them and cite them in your response using "Per `rule-name`..."
-3. **Apply MooseStack patterns:** Each rule includes TypeScript and Python examples for data models, OlapTables, and APIs
-4. **If no rule exists:** Use MooseStack or ClickHouse documentation
-5. **If uncertain:** Use web search for current best practices
-6. **Always cite your source:** rule name, "general MooseStack guidance", or URL
+### Inline mode (default — use this during authoring / optimization)
 
-**Why rules take priority:** ClickHouse has specific behaviors (columnar storage, sparse indexes, merge tree mechanics) where general database intuition can be misleading. The rules encode validated guidance with MooseStack-specific patterns for TypeScript and Python.
+When the user is actively building or iterating on code, apply rules **inline**:
+
+1. Identify which 1–2 rules are directly relevant to the **current decision** (e.g. choosing an ORDER BY, picking a type, deciding on batch size).
+2. Read **only those** rule file(s). Do not pre-emptively read 6+ rules.
+3. Apply the rule immediately in the code you're writing; cite the rule name in a brief comment or sentence (e.g. *"Per `schema-pk-cardinality-order`, ORDER BY user_id, event_ts."*).
+4. **Keep moving** — continue writing the pipeline, schema, or query. Do NOT stop to emit a "Rules Checked / Findings" audit.
+
+Use the Quick Reference table and Rule Categories below to find the right rule fast.
+
+### Review mode (only when the user asks for a review/audit)
+
+If the user explicitly says "review", "audit", "check for violations", or "what's wrong with this schema?" — and existing code is present to review — then follow the **Review Procedures** section below, read the listed rule files in order, and emit the structured **Output Format**.
+
+Never enter review mode during greenfield authoring or time-boxed pipeline construction unless the user specifically asks for it. Writing working code first and checking rules along the way is almost always the right call.
+
+**Why rules take priority (either mode):** ClickHouse has specific behaviors (columnar storage, sparse indexes, merge tree mechanics) where general database intuition can be misleading. The rules encode validated guidance with MooseStack-specific patterns for TypeScript and Python.
 
 ### For Formal Reviews
 
-When performing a formal review of MooseStack data models, schemas, queries, or data ingestion:
+When the user explicitly requests a review:
 
 ---
 
