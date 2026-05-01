@@ -37,15 +37,16 @@ Comprehensive best practices for ClickHouse database optimization in MooseStack 
    - 1.13 [Use Native Types Instead of String](#113-use-native-types-instead-of-string)
    - 1.14 [Use Partitioning for Data Lifecycle Management](#114-use-partitioning-for-data-lifecycle-management)
 2. [Query Optimization](#2-query-optimization) — **CRITICAL**
-   - 2.1 [Choose the Right JOIN Algorithm](#21-choose-the-right-join-algorithm)
-   - 2.2 [Consider Alternatives to JOINs](#22-consider-alternatives-to-joins)
-   - 2.3 [Filter Tables Before Joining](#23-filter-tables-before-joining)
-   - 2.4 [Optimize NULL Handling in Outer JOINs](#24-optimize-null-handling-in-outer-joins)
-   - 2.5 [Use ANY JOIN When Only One Match Needed](#25-use-any-join-when-only-one-match-needed)
-   - 2.6 [Use Data Skipping Indices for Non-ORDER BY Filters](#26-use-data-skipping-indices-for-non-order-by-filters)
-   - 2.7 [Use Incremental MVs for Real-Time Aggregations](#27-use-incremental-mvs-for-real-time-aggregations)
-   - 2.8 [Use Refreshable MVs for Complex Joins and Batch Workflows](#28-use-refreshable-mvs-for-complex-joins-and-batch-workflows)
-   - 2.9 [When to Propose a Materialized View](#29-when-to-propose-a-materialized-view)
+   - 2.1 [Avoid Aggregate Aliases That Shadow Source Columns in WHERE](#21-avoid-aggregate-aliases-that-shadow-source-columns-in-where)
+   - 2.2 [Choose the Right JOIN Algorithm](#22-choose-the-right-join-algorithm)
+   - 2.3 [Consider Alternatives to JOINs](#23-consider-alternatives-to-joins)
+   - 2.4 [Filter Tables Before Joining](#24-filter-tables-before-joining)
+   - 2.5 [Optimize NULL Handling in Outer JOINs](#25-optimize-null-handling-in-outer-joins)
+   - 2.6 [Use ANY JOIN When Only One Match Needed](#26-use-any-join-when-only-one-match-needed)
+   - 2.7 [Use Data Skipping Indices for Non-ORDER BY Filters](#27-use-data-skipping-indices-for-non-order-by-filters)
+   - 2.8 [Use Incremental MVs for Real-Time Aggregations](#28-use-incremental-mvs-for-real-time-aggregations)
+   - 2.9 [Use Refreshable MVs for Complex Joins and Batch Workflows](#29-use-refreshable-mvs-for-complex-joins-and-batch-workflows)
+   - 2.10 [When to Propose a Materialized View](#210-when-to-propose-a-materialized-view)
 3. [Insert Strategy](#3-insert-strategy) — **CRITICAL**
    - 3.1 [Avoid ALTER TABLE DELETE](#31-avoid-alter-table-delete)
    - 3.2 [Avoid ALTER TABLE UPDATE](#32-avoid-alter-table-update)
@@ -1302,7 +1303,147 @@ Reference: [https://clickhouse.com/docs/best-practices/choosing-a-partitioning-k
 
 Query patterns dramatically affect performance. JOIN algorithms, filtering strategies, skipping indices, and materialized views can reduce query time from minutes to milliseconds. Pre-computed aggregations read thousands of rows instead of billions.
 
-### 2.1 Choose the Right JOIN Algorithm
+### 2.1 Avoid Aggregate Aliases That Shadow Source Columns in WHERE
+
+**Impact: HIGH (Prevents ILLEGAL_AGGREGATION errors at runtime)**
+
+When a SELECT aliases an aggregate to the same name as a source column (e.g., `any(category) AS category`), the alias *shadows* the column inside that SELECT. A `WHERE category = ...` on the same SELECT resolves to the alias — the aggregate result — and ClickHouse raises:
+
+> Code: 184. DB::Exception: Aggregate function any(category) AS category is found in WHERE in query.
+
+This is a runtime resolution error, so type checking and PR review usually miss it. Move the filter to a context where the column reference is unambiguous.
+
+**Incorrect: filter on aggregate-aliased column in same SELECT**
+
+```sql
+-- The WHERE-side `category` resolves to `any(category) AS category` (the aggregate),
+-- not the underlying column. ClickHouse raises ILLEGAL_AGGREGATION.
+WITH inv AS (
+    SELECT
+        product_id,
+        any(category) AS category,
+        sum(stock_qty) AS stock_qty
+    FROM inventory
+    WHERE category NOT IN ('Trials', 'Samples')
+    GROUP BY product_id
+)
+SELECT * FROM inv;
+```
+
+**Correct: filter in a downstream CTE where the alias is a plain projection**
+
+```sql
+WITH inv AS (
+    SELECT
+        product_id,
+        any(category) AS category,
+        sum(stock_qty) AS stock_qty
+    FROM inventory
+    GROUP BY product_id
+),
+cleaned AS (
+    SELECT *
+    FROM inv
+    WHERE category NOT IN ('Trials', 'Samples')
+)
+SELECT * FROM cleaned;
+```
+
+**Also correct: push filter into a subquery before the aggregate**
+
+```sql
+WITH inv AS (
+    SELECT
+        product_id,
+        any(category) AS category,
+        sum(stock_qty) AS stock_qty
+    FROM (
+        SELECT *
+        FROM inventory
+        WHERE category NOT IN ('Trials', 'Samples')
+    )
+    GROUP BY product_id
+)
+SELECT * FROM inv;
+```
+
+**Also correct: use HAVING to filter the aggregated result**
+
+```sql
+-- HAVING is evaluated after aggregation, so the alias is the right reference.
+-- Note: HAVING filters AFTER aggregation runs, so it is slightly less efficient
+-- than filtering before; prefer the subquery form for large inputs.
+WITH inv AS (
+    SELECT
+        product_id,
+        any(category) AS category,
+        sum(stock_qty) AS stock_qty
+    FROM inventory
+    GROUP BY product_id
+    HAVING category NOT IN ('Trials', 'Samples')
+)
+SELECT * FROM inv;
+```
+
+**Also correct: rename the alias so it doesn't shadow**
+
+```sql
+-- If you control the alias, simply giving the aggregate a distinct name
+-- removes the collision entirely.
+WITH inv AS (
+    SELECT
+        product_id,
+        any(category) AS category_first,
+        sum(stock_qty) AS stock_qty
+    FROM inventory
+    WHERE category NOT IN ('Trials', 'Samples')
+    GROUP BY product_id
+)
+SELECT * FROM inv;
+```
+
+**MooseStack - Apply this pattern in API query handlers:**
+
+```python
+from moose_lib import Api
+from pydantic import BaseModel
+
+class Params(BaseModel):
+    exclude_categories: list[str] = []
+
+async def stock_report_handler(params: Params, ctx):
+    # Bind the filter to the downstream CTE where `inv.category` is a plain
+    # column reference, not the `any(category) AS category` alias.
+    category_filter = (
+        "AND inv.category NOT IN ({categories: Array(String)})"
+        if params.exclude_categories else ""
+    )
+    query = f"""
+      WITH inv AS (
+        SELECT
+          product_id,
+          any(category) AS category,
+          sum(stock_qty) AS stock_qty
+        FROM inventory
+        GROUP BY product_id
+      ),
+      cleaned AS (
+        SELECT *
+        FROM inv
+        WHERE 1=1 {category_filter}
+      )
+      SELECT * FROM cleaned
+    """
+    return await ctx.client.query(query, {"categories": params.exclude_categories})
+
+stock_report_api = Api[Params, list]("stock-report", stock_report_handler)
+```
+
+When an API query builds CTEs that fan in through `any()` / `argMax()` / `groupArray()` aggregates and the caller passes a filter on one of those columns, route the filter to a downstream CTE. This keeps the filter optional (toggle-able) and avoids the alias collision.
+
+Reference: [https://clickhouse.com/docs/sql-reference/aggregate-functions](https://clickhouse.com/docs/sql-reference/aggregate-functions)
+
+### 2.2 Choose the Right JOIN Algorithm
 
 **Impact: CRITICAL (Wrong algorithm causes OOM; right algorithm handles large tables efficiently)**
 
@@ -1370,7 +1511,7 @@ These JOIN optimization patterns apply to any ClickHouse query in your MooseStac
 
 Reference: [https://clickhouse.com/docs/best-practices/minimize-optimize-joins](https://clickhouse.com/docs/best-practices/minimize-optimize-joins)
 
-### 2.2 Consider Alternatives to JOINs
+### 2.3 Consider Alternatives to JOINs
 
 **Impact: CRITICAL (Dictionaries and denormalization shift work from query time to insert time)**
 
@@ -1468,7 +1609,7 @@ MooseStack supports materialized views for denormalization. Instead of repeated 
 
 Reference: [https://clickhouse.com/docs/best-practices/minimize-optimize-joins](https://clickhouse.com/docs/best-practices/minimize-optimize-joins)
 
-### 2.3 Filter Tables Before Joining
+### 2.4 Filter Tables Before Joining
 
 **Impact: CRITICAL (Joining full tables then filtering wastes resources)**
 
@@ -1544,7 +1685,7 @@ These SQL optimization patterns apply to any ClickHouse query, whether in MooseS
 
 Reference: [https://clickhouse.com/docs/best-practices/minimize-optimize-joins](https://clickhouse.com/docs/best-practices/minimize-optimize-joins)
 
-### 2.4 Optimize NULL Handling in Outer JOINs
+### 2.5 Optimize NULL Handling in Outer JOINs
 
 **Impact: MEDIUM (Default values instead of NULL reduces memory overhead)**
 
@@ -1593,7 +1734,7 @@ const ordersApi = new Api<QueryParams, Result[]>(
 
 Reference: [https://clickhouse.com/docs/best-practices/minimize-optimize-joins](https://clickhouse.com/docs/best-practices/minimize-optimize-joins)
 
-### 2.5 Use ANY JOIN When Only One Match Needed
+### 2.6 Use ANY JOIN When Only One Match Needed
 
 **Impact: HIGH (Returns first match only; less memory and faster execution)**
 
@@ -1653,7 +1794,7 @@ These SQL optimization patterns apply to any ClickHouse query in your MooseStack
 
 Reference: [https://clickhouse.com/docs/best-practices/minimize-optimize-joins](https://clickhouse.com/docs/best-practices/minimize-optimize-joins)
 
-### 2.6 Use Data Skipping Indices for Non-ORDER BY Filters
+### 2.7 Use Data Skipping Indices for Non-ORDER BY Filters
 
 **Impact: HIGH (Up to 60x faster queries by skipping irrelevant granules)**
 
@@ -1759,7 +1900,7 @@ events_table = OlapTable[Event]("events", OlapConfig(
 
 Reference: [https://clickhouse.com/docs/best-practices/use-data-skipping-indices-where-appropriate](https://clickhouse.com/docs/best-practices/use-data-skipping-indices-where-appropriate)
 
-### 2.7 Use Incremental MVs for Real-Time Aggregations
+### 2.8 Use Incremental MVs for Real-Time Aggregations
 
 **Impact: HIGH (Read thousands of rows instead of billions; minimal cluster overhead)**
 
@@ -1846,7 +1987,7 @@ events_hourly_mv = MaterializedView(
 
 Reference: [https://clickhouse.com/docs/best-practices/use-materialized-views](https://clickhouse.com/docs/best-practices/use-materialized-views)
 
-### 2.8 Use Refreshable MVs for Complex Joins and Batch Workflows
+### 2.9 Use Refreshable MVs for Complex Joins and Batch Workflows
 
 **Impact: HIGH (Sub-millisecond queries with periodic refresh; ideal for complex joins)**
 
@@ -1937,7 +2078,7 @@ orders_denormalized_mv = MaterializedView(
 
 Reference: [https://clickhouse.com/docs/best-practices/use-materialized-views](https://clickhouse.com/docs/best-practices/use-materialized-views)
 
-### 2.9 When to Propose a Materialized View
+### 2.10 When to Propose a Materialized View
 
 **Impact: HIGH (Reduces repeated full-table scans from billions of rows to thousands; query time from seconds to milliseconds)**
 

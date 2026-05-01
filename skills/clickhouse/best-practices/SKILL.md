@@ -93,12 +93,14 @@ When the user explicitly requests a review:
 3. `rules/query-join-use-any.md` - ANY vs regular JOIN
 4. `rules/query-index-skipping-indices.md` - Secondary index usage
 5. `rules/schema-pk-filter-on-orderby.md` - Filter alignment with ORDER BY
+6. `rules/query-aggregate-alias-shadow.md` - Aggregate alias collisions in WHERE
 
 **Check for:**
 - [ ] Filters use ORDER BY prefix columns
 - [ ] JOINs filter tables before joining (not after)
 - [ ] Correct JOIN algorithm for table sizes
 - [ ] Skipping indices for non-ORDER BY filter columns
+- [ ] No `WHERE col = …` on a SELECT that aliases `any(col) AS col` (or similar) — filter downstream, use HAVING, or rename the alias
 
 ### For Insert Strategy Reviews (data ingestion, updates, deletes)
 
@@ -159,7 +161,8 @@ Structure your response as follows:
 | 8 | Materialized Views | HIGH | `query-mv-` | 2 |
 | 9 | Async Inserts | HIGH | `insert-async-` | 2 |
 | 10 | OPTIMIZE Avoidance | HIGH | `insert-optimize-` | 1 |
-| 11 | JSON Usage | MEDIUM | `schema-json-` | 1 |
+| 11 | Aggregation Aliasing | HIGH | `query-aggregate-` | 1 |
+| 12 | JSON Usage | MEDIUM | `schema-json-` | 1 |
 
 ---
 
@@ -207,6 +210,10 @@ Structure your response as follows:
 
 - `query-mv-incremental` - Incremental MVs for real-time aggregations
 - `query-mv-refreshable` - Refreshable MVs for complex joins
+
+### Query Optimization - Aggregation (HIGH)
+
+- `query-aggregate-alias-shadow` - Don't filter on a column shadowed by an aggregate alias (raises ILLEGAL_AGGREGATION)
 
 ### Insert Strategy - Batching (CRITICAL)
 
