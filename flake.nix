@@ -1,5 +1,5 @@
 {
-  description = "Agent Skills - MooseStack + ClickHouse best practices";
+  description = "Agent Skills";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
@@ -18,7 +18,6 @@
         {
           default = pkgs.mkShell {
             packages = with pkgs; [
-              bun
               git
             ];
           };
