@@ -6,13 +6,6 @@ build/
 .env
 .env.*
 !.env.example
-bun.lockb
-
-# Build artifacts
-packages/*/bin/
-packages/*/dist/
-packages/*/build/
-
 # Temporary files
 *.tmp
 *.swp
