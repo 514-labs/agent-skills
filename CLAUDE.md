@@ -35,7 +35,3 @@ agent-skills/
 - `SKILL.md` is always uppercase, always that exact filename
 - Keep `SKILL.md` under 500 lines — only the name and description load at startup; the full file loads on demand
 - Write a specific `description` so agents know exactly when to activate the skill
-
-## CI
-
-GitHub Actions (`.github/workflows/ci.yml`) checks that every skill directory contains a `SKILL.md` with `name` and `description` frontmatter, plus a `metadata.json`.
