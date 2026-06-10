@@ -15,9 +15,6 @@ agent-skills/
 │       ├── SKILL.md      # Skill definition (frontmatter + instructions)
 │       ├── metadata.json # Version, organization, abstract
 │       └── README.md     # Maintainer guide and conventions
-├── .github/
-│   └── workflows/
-│       └── ci.yml        # Validates skill structure
 ├── AGENTS.md             # This file
 ├── CLAUDE.md             # Claude Code-specific guidance
 └── README.md             # User-facing documentation
