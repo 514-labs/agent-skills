@@ -73,6 +73,7 @@ EOF
     dry=0
     for a in "$@"; do
       case "$a" in
+        --help|-h) emit_help; exit 0 ;;
         --dry-run) dry=1 ;;
         *.yaml|*.yml) file=$a ;;
       esac

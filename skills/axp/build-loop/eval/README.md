@@ -56,7 +56,17 @@ description.
 
 ## Known assumptions
 
-- The in-sandbox agent honors project-level `.claude/skills/` discovery; if
-  recall is 0% even for `explicit-invoke`, suspect that, not the description.
+- The in-sandbox agent honors project-level `.claude/skills/` discovery
+  (verified June 2026: the skill shows up in ACP `available_commands_update`
+  and activates). If recall is 0% even for `explicit-invoke`, suspect the
+  harness/discovery, not the description.
 - The dummy `axp` is an activation fixture, not a simulator — don't extend
   it to test axp itself.
+
+## Shakedown results (June 2026, n=1 per variant)
+
+First real run: recall 3/3 on explicit/trigger/paraphrase, 0 false triggers
+on negative-control, full stage adherence (journal + Y₀ control + validate →
+dry-run → run ordering), ~$0.60–0.80 and 5–6 min per positive variant
+(sonnet). The agent completed the whole loop unprompted and recommended a
+winner with a sensible lap-2 proposal.

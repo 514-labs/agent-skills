@@ -47,7 +47,9 @@ matrix:
       overrides:
         setup: &install-dummy |
           install -m 0755 /workspace/bin/axp /usr/local/bin/axp
-          touch /workspace/.axp-calls.log
+          # setup runs as root; the agent does not. The log must be writable
+          # by the agent user or every dummy-axp invocation dies on append.
+          install -m 0666 /dev/null /workspace/.axp-calls.log
         prompt: |
           Use the axp-build-loop skill for this: improve the --help text of
           the CLI at /workspace/greet (run it with `node greet.js`) so coding
@@ -94,22 +96,28 @@ tests:
       script: |
         set -u
         log=/workspace/.axp-calls.log
+        # The setup check itself logs `axp run --help`; "real run" means an
+        # experiment file was passed and it wasn't a --dry-run. The agent may
+        # root the loop in the artifact's repo (e.g. /workspace/greet/.axp/),
+        # so search the whole workspace rather than hardcoding a path.
         case "$AXP_VARIANT_ID" in
           negative-control)
-            # The build loop must NOT have run: no loop home, no axp run.
-            [ ! -d /workspace/.axp/loops ] && ! grep -q '^axp run' "$log"
+            # The build loop must NOT have run: no loop home, no real axp run.
+            [ -z "$(find /workspace -type d -path '*/.axp/loops' 2>/dev/null)" ] || exit 1
+            ! { grep -E '^axp run .*\.ya?ml' "$log" 2>/dev/null | grep -qv -- '--dry-run'; }
             ;;
           *)
             # Stage adherence when the loop runs:
             # 1) journal exists with a hypothesis
-            journal=$(ls /workspace/.axp/loops/*/LOOP.md 2>/dev/null | head -1)
+            journal=$(find /workspace -type f -path '*/.axp/loops/*/LOOP.md' 2>/dev/null | head -1)
             [ -n "$journal" ] || exit 1
             grep -qi 'hypothesis' "$journal" || exit 1
             # 2) the authored matrix includes a baseline control variant
-            grep -qiE 'id:[[:space:]]*(y0|baseline|control)' /workspace/.axp/loops/*/lap*.yaml || exit 1
+            find /workspace -type f -path '*/.axp/loops/*' -name 'lap*.yaml' 2>/dev/null \
+              | xargs grep -liE 'id:[[:space:]]*"?(y-?0|baseline|control)' | grep -q . || exit 1
             # 3) validate happened before the first real run
-            v=$(grep -n '^axp validate' "$log" | head -1 | cut -d: -f1)
-            r=$(grep -n '^axp run' "$log" | grep -v -- '--dry-run' | head -1 | cut -d: -f1)
+            v=$(grep -nE '^axp validate' "$log" | head -1 | cut -d: -f1)
+            r=$(grep -nE '^axp run .*\.ya?ml' "$log" | grep -v -- '--dry-run' | head -1 | cut -d: -f1)
             [ -n "$v" ] && [ -n "$r" ] && [ "$v" -lt "$r" ]
             ;;
         esac
@@ -120,8 +128,8 @@ tests:
         case "$AXP_VARIANT_ID" in
           negative-control) exit 0 ;;
           *)
-            d=$(grep -n '^axp run.*--dry-run' "$log" | head -1 | cut -d: -f1)
-            r=$(grep -n '^axp run' "$log" | grep -v -- '--dry-run' | head -1 | cut -d: -f1)
+            d=$(grep -nE '^axp run .*--dry-run' "$log" | head -1 | cut -d: -f1)
+            r=$(grep -nE '^axp run .*\.ya?ml' "$log" | grep -v -- '--dry-run' | head -1 | cut -d: -f1)
             [ -n "$d" ] && [ -n "$r" ] && [ "$d" -lt "$r" ]
             ;;
         esac
@@ -129,13 +137,16 @@ tests:
     - name: skill-recall
       script: |
         set -u
-        # Count references to the skill in the agent's tool calls. Scoped to
-        # .tool_calls so the skill merely being *listed* as available (system
-        # context) doesn't count as activation.
-        hits=$(jq '[.tool_calls[]? | tostring | select(test("axp-build-loop"))] | length' "$AXP_TRACE_PATH" 2>/dev/null || echo 0)
+        # The trace is JSONL of ACP JSON-RPC frames with payloads in
+        # .raw_json. Skill activation shows up as a tool_call_update whose
+        # rawInput.skill is the skill name — being merely *listed* in
+        # available_commands_update does not count.
+        hits=$(jq -r '.raw_json | if type=="string" then fromjson else . end
+                      | .params.update.rawInput.skill? // empty' \
+                 "$AXP_TRACE_PATH" 2>/dev/null | grep -cx 'axp-build-loop' || true)
         case "$AXP_VARIANT_ID" in
-          negative-control) [ "$hits" -eq 0 ] ;;
-          *) [ "$hits" -ge 1 ] ;;
+          negative-control) [ "${hits:-0}" -eq 0 ] ;;
+          *) [ "${hits:-0}" -ge 1 ] ;;
         esac
 limits:
   max_turns: 120
