@@ -1,0 +1,69 @@
+# Lightweight skill validation (the CI promised in the skeleton reset, #18).
+#
+# Also load-bearing for code scanning: CodeQL *default setup* on this repo
+# analyzes the `actions` language and fails with "no source code seen" when
+# the repo contains zero workflow files (see #19, which removed the last
+# ones). Any workflow under .github/workflows/ keeps that analyzer fed —
+# don't delete this file without replacing it.
+
+name: Validate skills
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate SKILL.md frontmatter and metadata.json
+        run: |
+          set -euo pipefail
+          status=0
+
+          # Every skill dir (skills/{namespace}/{name}/, template excluded)
+          # must have: SKILL.md with `name:` + `description:` frontmatter,
+          # and a sibling metadata.json that parses.
+          while IFS= read -r -d '' skill; do
+            dir=$(dirname "$skill")
+            echo "checking $dir"
+
+            if [ "$(head -n 1 "$skill")" != "---" ]; then
+              echo "::error file=$skill::SKILL.md must start with YAML frontmatter (---)"
+              status=1
+              continue
+            fi
+
+            frontmatter=$(awk '/^---$/{ c++; next } c==1' "$skill")
+
+            if ! grep -Eq '^name:[[:space:]]*[a-z0-9][a-z0-9-]*[[:space:]]*$' <<<"$frontmatter"; then
+              echo "::error file=$skill::frontmatter needs a kebab-case 'name:'"
+              status=1
+            fi
+
+            if ! grep -Eq '^description:' <<<"$frontmatter"; then
+              echo "::error file=$skill::frontmatter needs a 'description:'"
+              status=1
+            fi
+
+            if [ ! -f "$dir/metadata.json" ]; then
+              echo "::error file=$dir::missing metadata.json"
+              status=1
+            elif ! jq empty "$dir/metadata.json" 2>/dev/null; then
+              echo "::error file=$dir/metadata.json::not valid JSON"
+              status=1
+            fi
+
+            if [ ! -f "$dir/README.md" ]; then
+              echo "::error file=$dir::missing README.md (maintainer guide)"
+              status=1
+            fi
+          done < <(find skills -mindepth 3 -maxdepth 3 -name SKILL.md -not -path 'skills/_template/*' -print0)
+
+          exit "$status"

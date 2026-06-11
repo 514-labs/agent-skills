@@ -1,0 +1,154 @@
+# yaml-language-server: $schema=https://docs.514.ai/schema/experiment.v1.schema.yaml
+#
+# Trigger/recall eval for the axp-build-loop skill. Each variant gives the
+# in-sandbox agent the SAME environment (skill installed at
+# .claude/skills/axp-build-loop/, a dummy `axp` on PATH, a fixture CLI at
+# /workspace/greet) and varies ONLY the user phrasing:
+#
+#   explicit-invoke  - names the skill (positive control; expected ~100%)
+#   trigger-phrase   - uses the description's trigger phrases
+#   paraphrase       - describes the goal in casual words, no trigger phrases
+#   negative-control - unrelated task; the skill should NOT fire
+#
+# The dummy axp (fixtures/axp) logs every invocation and fabricates run
+# artifacts, so the loop can play out without docker-in-docker. Run with
+# repeats — recall is a rate, not a boolean:
+#   axp run skills/axp/build-loop/eval/experiment.yaml --repeat 5 --jobs 4
+schema_version: 1
+id: build-loop-skill-recall
+name: "axp-build-loop skill: activation recall + stage adherence"
+description: >
+  Measures whether a coding agent invokes the axp-build-loop skill across
+  prompt phrasings (explicit, trigger-phrase, paraphrase, negative control)
+  and, when it fires, whether the agent follows the skill's stages: validate
+  and dry-run before running, Y0 baseline control in the matrix, LOOP.md
+  journal written.
+flow:
+  prompt: |
+    I want to test variants of my CLI's help text and see which version works
+    better for coding agents. The CLI is at /workspace/greet (run it with
+    `node greet.js`). I pre-approve all approval gates in advance: budget,
+    worktrees, and runs. Do not push anything or open a PR — stop after
+    presenting the lap-1 comparison.
+files:
+  - name: skill
+    source: ../SKILL.md
+    dest: .claude/skills/axp-build-loop/SKILL.md
+  - name: dummy-axp
+    source: ./fixtures/axp
+    dest: bin/axp
+  - name: greet-cli
+    source: ./fixtures/greet
+    dest: greet
+matrix:
+  variant:
+    - id: explicit-invoke
+      tag: explicit
+      overrides:
+        setup: &install-dummy |
+          install -m 0755 /workspace/bin/axp /usr/local/bin/axp
+          # setup runs as root; the agent does not. The log must be writable
+          # by the agent user or every dummy-axp invocation dies on append.
+          install -m 0666 /dev/null /workspace/.axp-calls.log
+        prompt: |
+          Use the axp-build-loop skill for this: improve the --help text of
+          the CLI at /workspace/greet (run it with `node greet.js`) so coding
+          agents misuse it less. I pre-approve all approval gates in advance:
+          budget, worktrees, and runs. Do not push anything or open a PR —
+          stop after presenting the lap-1 comparison.
+    - id: trigger-phrase
+      tag: trigger
+      overrides:
+        setup: *install-dummy
+    - id: paraphrase
+      tag: paraphrase
+      overrides:
+        setup: *install-dummy
+        prompt: |
+          Coding agents keep misusing the flags of the little CLI at
+          /workspace/greet (run it with `node greet.js`). Try a few different
+          ideas for its help text and figure out which one confuses agents
+          the least. You don't need to ask me for permission for anything,
+          but don't push or open a PR — stop once you've compared the ideas
+          and tell me what you found.
+    - id: negative-control
+      tag: negative
+      overrides:
+        setup: *install-dummy
+        prompt: |
+          Add a --version flag to the CLI at /workspace/greet (run it with
+          `node greet.js`) that prints the version from its package.json,
+          and mention the new flag in the help output. Stop when it works.
+model: claude-sonnet-4-6
+setup_checks:
+  - name: dummy-axp-on-path
+    script: |
+      command -v axp && axp run --help | grep -q -- '--file'
+  - name: skill-installed
+    script: |
+      grep -q '^name: axp-build-loop$' /workspace/.claude/skills/axp-build-loop/SKILL.md
+  - name: node-available
+    script: |
+      node /workspace/greet/greet.js --help
+tests:
+  application:
+    - name: loop-behaviors
+      script: |
+        set -u
+        log=/workspace/.axp-calls.log
+        # The setup check itself logs `axp run --help`; "real run" means an
+        # experiment file was passed and it wasn't a --dry-run. The agent may
+        # root the loop in the artifact's repo (e.g. /workspace/greet/.axp/),
+        # so search the whole workspace rather than hardcoding a path.
+        case "$AXP_VARIANT_ID" in
+          negative-control)
+            # The build loop must NOT have run: no loop home, no real axp run.
+            [ -z "$(find /workspace -type d -path '*/.axp/loops' 2>/dev/null)" ] || exit 1
+            ! { grep -E '^axp run .*\.ya?ml' "$log" 2>/dev/null | grep -qv -- '--dry-run'; }
+            ;;
+          *)
+            # Stage adherence when the loop runs:
+            # 1) journal exists with a hypothesis
+            journal=$(find /workspace -type f -path '*/.axp/loops/*/LOOP.md' 2>/dev/null | head -1)
+            [ -n "$journal" ] || exit 1
+            grep -qi 'hypothesis' "$journal" || exit 1
+            # 2) the authored matrix includes a baseline control variant
+            find /workspace -type f -path '*/.axp/loops/*' -name 'lap*.yaml' 2>/dev/null \
+              | xargs grep -liE 'id:[[:space:]]*"?(y-?0|baseline|control)' | grep -q . || exit 1
+            # 3) validate happened before the first real run
+            v=$(grep -nE '^axp validate' "$log" | head -1 | cut -d: -f1)
+            r=$(grep -nE '^axp run .*\.ya?ml' "$log" | grep -v -- '--dry-run' | head -1 | cut -d: -f1)
+            [ -n "$v" ] && [ -n "$r" ] && [ "$v" -lt "$r" ]
+            ;;
+        esac
+    - name: dry-run-before-run
+      script: |
+        set -u
+        log=/workspace/.axp-calls.log
+        case "$AXP_VARIANT_ID" in
+          negative-control) exit 0 ;;
+          *)
+            d=$(grep -nE '^axp run .*--dry-run' "$log" | head -1 | cut -d: -f1)
+            r=$(grep -nE '^axp run .*\.ya?ml' "$log" | grep -v -- '--dry-run' | head -1 | cut -d: -f1)
+            [ -n "$d" ] && [ -n "$r" ] && [ "$d" -lt "$r" ]
+            ;;
+        esac
+  introspection:
+    - name: skill-recall
+      script: |
+        set -u
+        # The trace is JSONL of ACP JSON-RPC frames with payloads in
+        # .raw_json. Skill activation shows up as a tool_call_update whose
+        # rawInput.skill is the skill name — being merely *listed* in
+        # available_commands_update does not count.
+        hits=$(jq -r '.raw_json | if type=="string" then fromjson else . end
+                      | .params.update.rawInput.skill? // empty' \
+                 "$AXP_TRACE_PATH" 2>/dev/null | grep -cx 'axp-build-loop' || true)
+        case "$AXP_VARIANT_ID" in
+          negative-control) [ "${hits:-0}" -eq 0 ] ;;
+          *) [ "${hits:-0}" -ge 1 ] ;;
+        esac
+limits:
+  max_turns: 120
+  max_time_seconds: 2400
+  max_cost_usd: 6.00

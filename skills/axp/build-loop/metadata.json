@@ -1,0 +1,9 @@
+{
+  "version": "0.1.0",
+  "organization": "514 Labs",
+  "abstract": "Guided build-loop workflow for axp: generate variants of a developer-facing artifact (CLI, MCP server, hooks, install script, docs, schema), implement them in parallel git worktrees, stage the WIP builds into isolated axp sandboxes, evaluate them against a naive agent with repeat runs, rank the results against a baseline control, and either promote the winner to a PR or iterate another lap.",
+  "references": [
+    "https://docs.514.ai",
+    "https://docs.514.ai/schema/experiment.v1.schema.yaml"
+  ]
+}
