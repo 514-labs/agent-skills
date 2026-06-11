@@ -1,0 +1,116 @@
+#!/usr/bin/env bash
+# Dummy `axp` CLI for evaluating the axp-build-loop skill inside an axp
+# sandbox (real docker-in-docker is unavailable there). It logs every
+# invocation to /workspace/.axp-calls.log and fabricates just enough of the
+# real CLI's observable behavior for the skill's stages to proceed:
+#   validate        -> silent success (file must exist)
+#   run --dry-run   -> staging-plan table with no MISSING/UNBOUND rows
+#   run             -> fabricated .axp/runs/<id>/ artifacts; the SECOND
+#                      variant declared in the YAML deterministically wins
+# Everything else is a thin stub. Not a simulator — an activation fixture.
+set -euo pipefail
+
+LOG=/workspace/.axp-calls.log
+printf 'axp %s\n' "$*" >> "$LOG"
+
+sub=${1:-}
+
+emit_help() {
+  cat <<'EOF'
+axp 9.9.9-dummy
+Usage: axp <COMMAND>
+
+Commands:
+  validate <FILE>   Validate an experiment YAML
+  run <FILE>        Run an experiment across its variant matrix
+  schema            Print the experiment schema reference
+  list              List runs under .axp/runs/
+
+Run options:
+  --repeat <N>      Run each variant N times
+  --jobs <N>        Concurrency across the matrix
+  --dry-run         Plan only; prints the staging table
+  --file <[VARIANT:]NAME=HOSTPATH | HOSTPATH::DEST>
+                    Override/bind a `files:` entry source, or stage ad-hoc
+EOF
+}
+
+variant_ids() {
+  # Crude-but-sufficient: `- id: <value>` lines only occur under matrix.variant
+  awk '/^[[:space:]]*-[[:space:]]*id:[[:space:]]*/ { print $NF }' "$1"
+}
+
+case "$sub" in
+  --version|version)
+    echo "axp 9.9.9-dummy"
+    ;;
+  --help|-h|help|"")
+    emit_help
+    ;;
+  schema)
+    cat <<'EOF'
+# Experiment schema (abridged). Authoritative copy:
+# https://docs.514.ai/schema/experiment.v1.schema.yaml
+# Required: schema_version(=1) id name flow{prompt} matrix{variant[]{id,tag}}
+#           model tests{application[],introspection[]} limits
+# Optional: description agent secrets files mcp_servers setup_checks
+# Variant overrides (additive unless noted): setup prompt(model/agent replace)
+#           secrets files mcp_servers setup_checks
+# files[*]: {name?, source?, dest} — staged into /workspace BEFORE setup.
+EOF
+    ;;
+  validate)
+    f=${2:-}
+    if [ -z "$f" ] || [ ! -f "$f" ]; then
+      echo "axp: experiment file not found: ${f:-<missing>}" >&2
+      exit 1
+    fi
+    grep -q 'schema_version' "$f" || { echo "axp: not an experiment file (missing schema_version)" >&2; exit 1; }
+    ;;
+  run)
+    shift
+    file=""
+    dry=0
+    for a in "$@"; do
+      case "$a" in
+        --dry-run) dry=1 ;;
+        *.yaml|*.yml) file=$a ;;
+      esac
+    done
+    if [ -z "$file" ] || [ ! -f "$file" ]; then
+      echo "axp: experiment file required" >&2
+      exit 1
+    fi
+    if [ "$dry" -eq 1 ]; then
+      echo "plan: $(variant_ids "$file" | wc -l | tr -d ' ') variant(s)"
+      printf '%-18s %-34s %s\n' "VARIANT" "FILES (source -> dest)" "STATUS"
+      while IFS= read -r id; do
+        printf '%-18s %-34s %s\n' "$id" "(staged per experiment files:)" "ok"
+      done < <(variant_ids "$file")
+      exit 0
+    fi
+    run_id="run-$(date +%s)"
+    root=".axp/runs/$run_id"
+    i=0
+    while IFS= read -r id; do
+      d="$root/variants/$id"
+      mkdir -p "$d/tests/application" "$d/tests/introspection"
+      if [ "$i" -eq 1 ]; then pass=pass; calls=6; cost=0.04; else pass=fail; calls=19; cost=0.11; fi
+      printf '{"variant_id":"%s","status":"ok","exit_reason":"completed","tool_calls":%d,"cost_usd":%s,"wall_clock_seconds":%d}\n' \
+        "$id" "$calls" "$cost" $((40 + calls)) > "$d/run.json"
+      printf '{"name":"task-outcome","status":"%s","stdout_tail":"fabricated by dummy axp"}\n' "$pass" \
+        > "$d/tests/application/task-outcome.json"
+      printf '{"name":"tool-call-budget","status":"%s"}\n' "$([ "$calls" -lt 10 ] && echo pass || echo fail)" \
+        > "$d/tests/introspection/tool-call-budget.json"
+      i=$((i + 1))
+    done < <(variant_ids "$file")
+    echo "$run_id"
+    ;;
+  list)
+    ls .axp/runs 2>/dev/null || true
+    ;;
+  *)
+    echo "axp: unknown command: $sub (dummy CLI — see axp --help)" >&2
+    exit 64
+    ;;
+esac

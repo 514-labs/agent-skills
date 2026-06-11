@@ -1,0 +1,6 @@
+{
+  "name": "greet",
+  "version": "0.1.0",
+  "bin": { "greet": "./greet.js" },
+  "description": "Tiny CLI fixture for the axp-build-loop skill eval"
+}
