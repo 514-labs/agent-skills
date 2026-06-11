@@ -16,7 +16,7 @@ Works with Claude Code, Cursor, Copilot, Windsurf, Gemini CLI, Codex, and [20+ o
 
 | Skill | Description |
 |-------|-------------|
-| _(none yet)_ | |
+| [`axp-build-loop`](./skills/axp/build-loop/) | Drive the axp experiment build loop from a coding-agent chat: generate variants of a CLI / MCP server / hooks / install script / docs / schema, build them in parallel worktrees, evaluate them in isolated sandboxes against a naive agent, rank vs a baseline control, then promote the winner to a PR or iterate another lap |
 
 ## Adding a Skill
 
